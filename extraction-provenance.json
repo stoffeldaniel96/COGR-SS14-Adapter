@@ -6,11 +6,43 @@
     "mappings":  [
                      {
                          "source":  "Content.Server/COGR",
-                         "destination":  "overlay/Content.Server/COGR"
+                         "destination":  "overlay/Content.Server/COGR",
+                         "ownership":  "adapter-source"
                      },
                      {
                          "source":  "Content.Shared/COGR",
-                         "destination":  "overlay/Content.Shared/COGR"
+                         "destination":  "overlay/Content.Shared/COGR",
+                         "ownership":  "adapter-source"
+                     },
+                     {
+                         "source":  "Content.Client/COGR",
+                         "destination":  "overlay/Content.Client/COGR",
+                         "ownership":  "adapter-diagnostics"
+                     },
+                     {
+                         "source":  "Content.Shared/CCVar/CCVars.COGR.cs",
+                         "destination":  "overlay/Content.Shared/CCVar/CCVars.COGR.cs",
+                         "ownership":  "adapter-configuration"
+                     },
+                     {
+                         "source":  "Content.Tests/COGR",
+                         "destination":  "overlay/Content.Tests/COGR",
+                         "ownership":  "adapter-tests"
+                     },
+                     {
+                         "source":  "Content.Tests/Server/COGR",
+                         "destination":  "overlay/Content.Tests/Server/COGR",
+                         "ownership":  "adapter-tests"
+                     },
+                     {
+                         "source":  "Resources/Locale/en-US/cogr",
+                         "destination":  "overlay/Resources/Locale/en-US/cogr",
+                         "ownership":  "adapter-localization"
+                     },
+                     {
+                         "source":  "Resources/Locale/en-US/commands/show-cogr-spatial-command.ftl",
+                         "destination":  "overlay/Resources/Locale/en-US/commands/show-cogr-spatial-command.ftl",
+                         "ownership":  "adapter-localization"
                      }
                  ]
 }
