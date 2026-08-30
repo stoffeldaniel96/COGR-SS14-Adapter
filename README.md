@@ -9,9 +9,12 @@ This repository owns the reusable Station-specific integration boundary. It does
 **Repository:** public  
 **License:** MIT  
 **Initial extraction source:** `stoffeldaniel96/COGR-Station`  
-**Initial extraction source commit:** `947b7462235f95bc3f9d48d834e6485af1557a91`
+**Initial extraction source commit:** `947b7462235f95bc3f9d48d834e6485af1557a91`  
+**Initial core extraction commit:** `02ae73ebce15a6bebf24001b58fdeda290b999e1`
 
-The adapter is currently being extracted from the full `COGR-Station` integration/testbed fork. Until the extraction and synchronization gate is complete, `COGR-Station` remains the authoritative live build checkout while this repository becomes the canonical home for reusable adapter source.
+The core server/shared adapter source has been extracted. A direct comparison against the recorded upstream SS14 base identified several additional COGR-owned additive surfaces (client diagnostics, CVar definitions, tests, and localization) which are now declared in `adapter-manifest.json` and must be included before the extraction boundary is called closed.
+
+Until that ownership closure and the synchronized Station gate are complete, the legacy `COGR-Station` full fork remains the accepted live reference checkout. The long-term COGR-Station target is a thin composition/acceptance repository that materializes exact pinned upstream SS14 + adapter + COGR runtime revisions rather than maintaining a hand-edited copy of the full Station tree.
 
 ## Responsibility
 
@@ -37,32 +40,35 @@ The adapter may own:
 - passive cue and semantic-replica delivery;
 - event-driven regional routing used by the adapter;
 - embodiment-support projection;
-- adapter diagnostics, configuration, and commands; and
+- adapter diagnostics, configuration, commands, tests, and localization; and
 - reusable adapter installation/synchronization tooling.
 
 The adapter must **not** own Coggent cognition, memory, goals, Concerns, procedure policy, target selection, host-independent navigation cognition, or other runtime mental state.
 
 ## Repository shape
 
-The intended source overlay is:
+Canonical adapter-owned Station source is stored under `overlay/` using destination-compatible paths. Current declared mappings include COGR-owned server/shared/client code, COGR CVar definitions, adapter tests, and adapter localization.
 
-```text
-overlay/
-  Content.Server/COGR/
-  Content.Shared/COGR/
-docs/
-scripts/
-adapter-manifest.json
-```
+`adapter-manifest.json` is authoritative for the declared reusable overlay boundary. The import and synchronization tools consume that manifest rather than carrying a second hard-coded ownership list.
 
-The overlay paths deliberately match their destination inside a Station checkout. A deterministic synchronization/install tool will copy only declared adapter-owned paths into `COGR-Station` or another compatible SS14 fork and record the adapter source revision.
+Station project/package dependency wiring is intentionally **not** hidden inside the source overlay. The future COGR-Station composition/install layer must apply that wiring explicitly and fail closed when upstream project structure changes.
 
-Acceptance maps, Station-wide configuration, bundled COGR runtime binaries, and SS14 assets are not adapter source by default.
+Acceptance maps, Station-wide launch configuration, bundled COGR runtime binaries, general SS14 assets, and testbed-only prototypes are not adapter source by default.
+
+## Upstream patches
+
+A reusable adapter should minimize edits to upstream-owned SS14 files. The legacy integration currently contains speech-delivery changes outside COGR-owned paths. Those changes must be either:
+
+1. accepted upstream by SS14;
+2. eliminated through a supported native extension point; or
+3. carried as an explicit minimal compatibility patch by the COGR-Station composition layer.
+
+Unrelated diagnostic/testbed fork edits should not become permanent adapter requirements merely because they existed in the legacy fork.
 
 ## Related repositories
 
 - [`stoffeldaniel96/COGR`](https://github.com/stoffeldaniel96/COGR) — environment-neutral cognitive runtime; Apache-2.0.
-- [`stoffeldaniel96/COGR-Station`](https://github.com/stoffeldaniel96/COGR-Station) — complete SS14 integration/testbed fork retaining upstream Station licensing and asset provenance.
+- [`stoffeldaniel96/COGR-Station`](https://github.com/stoffeldaniel96/COGR-Station) — current integration/acceptance repository; migrating from a complete development fork toward a thin lockfile-driven Station composition workspace.
 
 ## Development rules
 
@@ -70,7 +76,7 @@ Read [`AGENTS.md`](AGENTS.md), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), a
 
 Adapter behavior should remain ordinary Station integration. Do not solve runtime cognition failures with adapter-authored knowledge, hidden world truth, path cursors, target-selection policy, or other cognitive shortcuts.
 
-Changes that affect the mirrored Station integration require a synchronized `COGR-Station` build/local gate before being declared integration-green.
+Changes that affect the materialized Station integration require a synchronized COGR-Station build/local gate before being declared integration-green.
 
 ## License
 
