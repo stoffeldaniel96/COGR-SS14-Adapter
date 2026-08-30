@@ -32,6 +32,11 @@ try {
     Write-Host "Creating detached worktree for COGR-Station $SourceCommit..."
     Invoke-Git -C $stationRoot worktree add --detach $tempRoot $SourceCommit
 
+    $sourceCommitDate = (& git -C $stationRoot show -s --format=%cI $SourceCommit).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($sourceCommitDate)) {
+        throw "Could not resolve source commit timestamp for $SourceCommit."
+    }
+
     $mappings = @(
         @{ Source = "Content.Server/COGR"; Destination = "overlay/Content.Server/COGR" },
         @{ Source = "Content.Shared/COGR"; Destination = "overlay/Content.Shared/COGR" }
@@ -58,7 +63,7 @@ try {
         schemaVersion = 1
         sourceRepository = "stoffeldaniel96/COGR-Station"
         sourceCommit = $SourceCommit
-        extractedAtUtc = [DateTime]::UtcNow.ToString("o")
+        sourceCommitDate = $sourceCommitDate
         mappings = @(
             [ordered]@{ source = "Content.Server/COGR"; destination = "overlay/Content.Server/COGR" },
             [ordered]@{ source = "Content.Shared/COGR"; destination = "overlay/Content.Shared/COGR" }
