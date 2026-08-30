@@ -151,7 +151,7 @@ foreach ($reference in $wiring.assemblyReferences) {
         if ($null -eq $existingHint) {
             $failures.Add("Content.Server Reference '$id' exists without a HintPath; expected '$hintPath'.")
         }
-        elseif ([string] $existingHint.InnerText -ne $hintPath) {
+        elseif (([string] $existingHint.InnerText) -ne $hintPath) {
             $failures.Add("Content.Server Reference '$id' uses '$($existingHint.InnerText)' but adapter declares '$hintPath'.")
         }
         continue
@@ -172,16 +172,13 @@ foreach ($reference in $wiring.assemblyReferences) {
 }
 
 if ($failures.Count -gt 0) {
-    Write-Host "Adapter install wiring verification failed:" -ForegroundColor Red
-    foreach ($failure in $failures) {
-        Write-Host "  - $failure" -ForegroundColor Red
-    }
-    exit 1
+    $detail = ($failures | Sort-Object -Unique) -join [Environment]::NewLine
+    throw "Adapter install wiring verification failed:$([Environment]::NewLine)$detail"
 }
 
 if ($VerifyOnly) {
     Write-Host "Adapter install wiring is present and compatible."
-    exit 0
+    return
 }
 
 if ($packagesChanged) {
