@@ -31,7 +31,8 @@ if (-not (Test-Path $manifestPath)) {
 }
 
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
-if (-not $manifest.mappings -or $manifest.mappings.Count -eq 0) {
+$mappings = @($manifest.mappings)
+if ($mappings.Count -eq 0) {
     throw "Adapter manifest contains no declared mappings."
 }
 
@@ -47,44 +48,58 @@ try {
         throw "Could not resolve source commit timestamp for $SourceCommit."
     }
 
-    $provenanceMappings = New-Object System.Collections.Generic.List[object]
+    # Use a native PowerShell array rather than Generic.List[object]. Windows PowerShell 5.1
+    # can throw 'Argument types do not match' while enumerating generic lists during
+    # expression/serialization binding.
+    $provenanceMappings = @()
 
-    foreach ($mapping in $manifest.mappings) {
-        if ([string]::IsNullOrWhiteSpace($mapping.source) -or [string]::IsNullOrWhiteSpace($mapping.stationDestination)) {
+    Write-Host "Importing $($mappings.Count) declared adapter mapping(s)..."
+    foreach ($mapping in $mappings) {
+        $mappingSource = [string] $mapping.source
+        $stationDestination = [string] $mapping.stationDestination
+        $ownership = [string] $mapping.ownership
+
+        if ([string]::IsNullOrWhiteSpace($mappingSource) -or [string]::IsNullOrWhiteSpace($stationDestination)) {
             throw "Adapter manifest contains a mapping without source/stationDestination."
         }
 
-        $source = Join-Path $tempRoot $mapping.stationDestination
-        $destination = Join-Path $adapterRoot $mapping.source
+        $source = Join-Path $tempRoot $stationDestination
+        $destination = Join-Path $adapterRoot $mappingSource
 
         if (-not (Test-Path -LiteralPath $source)) {
-            throw "Expected adapter source path does not exist at extraction commit: $($mapping.stationDestination)"
+            throw "Expected adapter source path does not exist at extraction commit: $stationDestination"
         }
 
         if (Test-Path -LiteralPath $destination) {
             Remove-Item -Recurse -Force -LiteralPath $destination
         }
 
-        New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
-        Copy-Item -Recurse -Force -LiteralPath $source -Destination $destination
-        Write-Host "Imported $($mapping.stationDestination) -> $($mapping.source)"
+        $destinationParent = Split-Path -Parent $destination
+        if (-not [string]::IsNullOrWhiteSpace($destinationParent)) {
+            New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
+        }
 
-        $provenanceMappings.Add([ordered]@{
-            source = $mapping.stationDestination
-            destination = $mapping.source
-            ownership = $mapping.ownership
-        })
+        Copy-Item -Recurse -Force -LiteralPath $source -Destination $destination
+        Write-Host "Imported $stationDestination -> $mappingSource"
+
+        $provenanceMappings += [pscustomobject][ordered]@{
+            source = $stationDestination
+            destination = $mappingSource
+            ownership = $ownership
+        }
     }
 
+    Write-Host "Writing deterministic extraction provenance..."
     $provenance = [ordered]@{
         schemaVersion = 1
         sourceRepository = "stoffeldaniel96/COGR-Station"
         sourceCommit = $SourceCommit
         sourceCommitDate = $sourceCommitDate
-        mappings = @($provenanceMappings)
+        mappings = $provenanceMappings
     }
 
-    $provenance | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $adapterRoot "extraction-provenance.json")
+    $provenanceJson = $provenance | ConvertTo-Json -Depth 6
+    Set-Content -LiteralPath (Join-Path $adapterRoot "extraction-provenance.json") -Value $provenanceJson -Encoding UTF8
 
     Write-Host ""
     Write-Host "Import complete. Run scripts/verify-public-readiness.ps1 before committing the extracted source."
