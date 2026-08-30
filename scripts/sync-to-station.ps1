@@ -115,15 +115,12 @@ function Get-AllDifferences {
 if ($VerifyOnly) {
     $differences = Get-AllDifferences
     if ($differences.Count -gt 0) {
-        Write-Host "Adapter/Station synchronization verification failed:" -ForegroundColor Red
-        foreach ($difference in $differences | Sort-Object -Unique) {
-            Write-Host "  - $difference" -ForegroundColor Red
-        }
-        exit 1
+        $detail = ($differences | Sort-Object -Unique) -join [Environment]::NewLine
+        throw "Adapter/Station synchronization verification failed:$([Environment]::NewLine)$detail"
     }
 
     Write-Host "Adapter/Station source trees are synchronized."
-    exit 0
+    return
 }
 
 foreach ($mapping in $manifest.mappings) {
