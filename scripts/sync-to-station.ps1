@@ -113,7 +113,9 @@ function Get-AllDifferences {
 }
 
 if ($VerifyOnly) {
-    $differences = Get-AllDifferences
+    # Windows PowerShell 5.1 unwraps function output: zero results become $null and
+    # one result becomes a scalar. Force array semantics before inspecting Count.
+    $differences = @(Get-AllDifferences)
     if ($differences.Count -gt 0) {
         $detail = ($differences | Sort-Object -Unique) -join [Environment]::NewLine
         throw "Adapter/Station synchronization verification failed:$([Environment]::NewLine)$detail"
@@ -160,7 +162,8 @@ $version = [ordered]@{
 
 $version | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 (Join-Path $stationRoot "COGR-ADAPTER-VERSION.json")
 
-$postSyncDifferences = Get-AllDifferences
+# See the VerifyOnly path above: preserve collection shape on Windows PowerShell 5.1.
+$postSyncDifferences = @(Get-AllDifferences)
 if ($postSyncDifferences.Count -gt 0) {
     $detail = ($postSyncDifferences | Sort-Object -Unique) -join [Environment]::NewLine
     throw "Post-sync verification failed:$([Environment]::NewLine)$detail"
