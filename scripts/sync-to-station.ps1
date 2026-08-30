@@ -13,6 +13,27 @@ $adapterRoot = Split-Path -Parent $PSScriptRoot
 $stationRoot = (Resolve-Path $StationRepoPath).Path
 $manifestPath = Join-Path $adapterRoot "adapter-manifest.json"
 
+function Get-PortableRelativePath {
+    param(
+        [Parameter(Mandatory = $true)][string] $BasePath,
+        [Parameter(Mandatory = $true)][string] $TargetPath
+    )
+
+    $baseFull = [System.IO.Path]::GetFullPath($BasePath)
+    $targetFull = [System.IO.Path]::GetFullPath($TargetPath)
+    $separator = [System.IO.Path]::DirectorySeparatorChar.ToString()
+
+    if (-not $baseFull.EndsWith($separator, [System.StringComparison]::Ordinal)) {
+        $baseFull += $separator
+    }
+
+    if (-not $targetFull.StartsWith($baseFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Path '$targetFull' is outside expected root '$baseFull'."
+    }
+
+    return $targetFull.Substring($baseFull.Length).Replace('\', '/')
+}
+
 if (-not (Test-Path (Join-Path $stationRoot ".git"))) {
     throw "StationRepoPath is not a Git checkout: $stationRoot"
 }
@@ -32,7 +53,7 @@ function Get-TreeState {
     }
 
     foreach ($file in Get-ChildItem -Path $Root -Recurse -File) {
-        $relative = [System.IO.Path]::GetRelativePath($Root, $file.FullName).Replace('\\', '/')
+        $relative = Get-PortableRelativePath -BasePath $Root -TargetPath $file.FullName
         $state[$relative] = (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash.ToLowerInvariant()
     }
 
