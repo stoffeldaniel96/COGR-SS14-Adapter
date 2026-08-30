@@ -6,7 +6,7 @@
     "sourceBranch": "main",
     "sourceCommit": "947b7462235f95bc3f9d48d834e6485af1557a91",
     "ss14IntegrationBaseCommit": "3aa6d7bf211fe7eaf7f3b9c96c455290db7fd29c",
-    "initialCogrAdapterImportCommit": "5ebc4178304273578bd0d2ff0a7cb2b0dde2997d"
+    "initialCoreExtractionCommit": "02ae73ebce15a6bebf24001b58fdeda290b999e1"
   },
   "mappings": [
     {
@@ -18,19 +18,69 @@
       "source": "overlay/Content.Shared/COGR",
       "stationDestination": "Content.Shared/COGR",
       "ownership": "adapter-source"
+    },
+    {
+      "source": "overlay/Content.Client/COGR",
+      "stationDestination": "Content.Client/COGR",
+      "ownership": "adapter-diagnostics"
+    },
+    {
+      "source": "overlay/Content.Shared/CCVar/CCVars.COGR.cs",
+      "stationDestination": "Content.Shared/CCVar/CCVars.COGR.cs",
+      "ownership": "adapter-configuration"
+    },
+    {
+      "source": "overlay/Content.Tests/COGR",
+      "stationDestination": "Content.Tests/COGR",
+      "ownership": "adapter-tests"
+    },
+    {
+      "source": "overlay/Content.Tests/Server/COGR",
+      "stationDestination": "Content.Tests/Server/COGR",
+      "ownership": "adapter-tests"
+    },
+    {
+      "source": "overlay/Resources/Locale/en-US/cogr",
+      "stationDestination": "Resources/Locale/en-US/cogr",
+      "ownership": "adapter-localization"
+    },
+    {
+      "source": "overlay/Resources/Locale/en-US/commands/show-cogr-spatial-command.ftl",
+      "stationDestination": "Resources/Locale/en-US/commands/show-cogr-spatial-command.ftl",
+      "ownership": "adapter-localization"
     }
+  ],
+  "integrationWiring": {
+    "ownership": "composition-install-wiring",
+    "legacyStationModifiedFiles": [
+      "Content.Server/Content.Server.csproj",
+      "Directory.Packages.props"
+    ],
+    "note": "These are not adapter source overlays. The composition/install layer must apply the minimal dependency/reference wiring explicitly and fail closed when upstream structure changes."
+  },
+  "upstreamPatchCandidates": [
+    "Content.Shared/Speech/ListenEvent.cs",
+    "Content.Shared/Speech/EntitySystems/ListeningSystem.cs"
+  ],
+  "legacyForkChangesToEliminateOrReclassify": [
+    "Content.Server/Spawners/EntitySystems/SpawnPointSystem.cs",
+    "Resources/ConfigPresets/Build/development.toml",
+    "Resources/Prototypes/tags.yml"
   ],
   "excludedByDefault": [
     "Resources/Maps/COGR",
     "Resources/Prototypes/COGR",
+    "Resources/Prototypes/Maps/cogr.yml",
     "lib",
     "cogr_server_config.toml",
     "Station-wide launch/test configuration",
     "SS14 assets"
   ],
   "notes": [
-    "Resources, prototypes, maps, scripts, and fork-level patches require explicit ownership classification before addition.",
+    "Only explicitly declared mappings are reusable adapter-owned overlay source.",
+    "Testbed maps/prototypes/configuration remain COGR-Station composition material unless separately reclassified.",
     "Bundled COGR runtime artifacts remain Apache-2.0 and are not adapter source.",
+    "Generic upstream-file modifications must be eliminated, upstreamed, or represented as explicit minimal composition patches.",
     "The synchronization process must fail rather than overwrite undeclared Station paths."
   ]
 }
