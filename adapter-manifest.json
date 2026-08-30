@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "adapterRepository": "stoffeldaniel96/COGR-SS14-Adapter",
+  "initialExtraction": {
+    "sourceRepository": "stoffeldaniel96/COGR-Station",
+    "sourceBranch": "main",
+    "sourceCommit": "947b7462235f95bc3f9d48d834e6485af1557a91",
+    "ss14IntegrationBaseCommit": "3aa6d7bf211fe7eaf7f3b9c96c455290db7fd29c",
+    "initialCogrAdapterImportCommit": "5ebc4178304273578bd0d2ff0a7cb2b0dde2997d"
+  },
+  "mappings": [
+    {
+      "source": "overlay/Content.Server/COGR",
+      "stationDestination": "Content.Server/COGR",
+      "ownership": "adapter-source"
+    },
+    {
+      "source": "overlay/Content.Shared/COGR",
+      "stationDestination": "Content.Shared/COGR",
+      "ownership": "adapter-source"
+    }
+  ],
+  "excludedByDefault": [
+    "Resources/Maps/COGR",
+    "Resources/Prototypes/COGR",
+    "lib",
+    "cogr_server_config.toml",
+    "Station-wide launch/test configuration",
+    "SS14 assets"
+  ],
+  "notes": [
+    "Resources, prototypes, maps, scripts, and fork-level patches require explicit ownership classification before addition.",
+    "Bundled COGR runtime artifacts remain Apache-2.0 and are not adapter source.",
+    "The synchronization process must fail rather than overwrite undeclared Station paths."
+  ]
+}
