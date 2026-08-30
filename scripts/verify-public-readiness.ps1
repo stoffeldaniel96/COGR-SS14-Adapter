@@ -7,6 +7,27 @@ Set-StrictMode -Version Latest
 $adapterRoot = Split-Path -Parent $PSScriptRoot
 $overlayRoot = Join-Path $adapterRoot "overlay"
 
+function Get-PortableRelativePath {
+    param(
+        [Parameter(Mandatory = $true)][string] $BasePath,
+        [Parameter(Mandatory = $true)][string] $TargetPath
+    )
+
+    $baseFull = [System.IO.Path]::GetFullPath($BasePath)
+    $targetFull = [System.IO.Path]::GetFullPath($TargetPath)
+    $separator = [System.IO.Path]::DirectorySeparatorChar.ToString()
+
+    if (-not $baseFull.EndsWith($separator, [System.StringComparison]::Ordinal)) {
+        $baseFull += $separator
+    }
+
+    if (-not $targetFull.StartsWith($baseFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Path '$targetFull' is outside expected root '$baseFull'."
+    }
+
+    return $targetFull.Substring($baseFull.Length).Replace('\', '/')
+}
+
 if (-not (Test-Path $overlayRoot)) {
     throw "No extracted overlay exists. Run scripts/import-from-station.ps1 first."
 }
@@ -40,7 +61,7 @@ $files = Get-ChildItem -Path $overlayRoot -Recurse -File | Where-Object { $textE
 
 foreach ($file in $files) {
     $content = Get-Content -Raw -LiteralPath $file.FullName
-    $relativePath = [System.IO.Path]::GetRelativePath($adapterRoot, $file.FullName)
+    $relativePath = Get-PortableRelativePath -BasePath $adapterRoot -TargetPath $file.FullName
 
     foreach ($pattern in $failurePatterns) {
         if ($content -match $pattern.Regex) {
