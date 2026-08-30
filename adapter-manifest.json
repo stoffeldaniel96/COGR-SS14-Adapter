@@ -51,12 +51,21 @@
     }
   ],
   "integrationWiring": {
-    "ownership": "composition-install-wiring",
-    "legacyStationModifiedFiles": [
-      "Content.Server/Content.Server.csproj",
-      "Directory.Packages.props"
+    "ownership": "adapter-install-wiring",
+    "contentServerProject": "Content.Server/Content.Server.csproj",
+    "centralPackageFile": "Directory.Packages.props",
+    "packageReferences": [
+      { "id": "Grpc.Net.Client", "version": "2.67.0" },
+      { "id": "Google.Protobuf", "version": "3.29.3" },
+      { "id": "Microsoft.Extensions.Logging.Abstractions", "version": "10.0.6" }
     ],
-    "note": "These are not adapter source overlays. The composition/install layer must apply the minimal dependency/reference wiring explicitly and fail closed when upstream structure changes."
+    "assemblyReferences": [
+      { "id": "COGR.Core", "hintPath": "..\\lib\\COGR.Core.dll" },
+      { "id": "COGR.Contracts", "hintPath": "..\\lib\\COGR.Contracts.dll" },
+      { "id": "COGR.Transport.Grpc", "hintPath": "..\\lib\\COGR.Transport.Grpc.dll" },
+      { "id": "COGR.SS14Bridge", "hintPath": "..\\lib\\COGR.SS14Bridge.dll" }
+    ],
+    "policy": "Installer adds missing declared references, accepts exact declared central package versions, and fails on conflicting existing versions or reference paths."
   },
   "upstreamPatchCandidates": [
     "Content.Shared/Speech/ListenEvent.cs",
