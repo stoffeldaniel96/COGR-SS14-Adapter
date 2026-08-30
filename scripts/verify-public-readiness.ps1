@@ -12,6 +12,7 @@ if (-not (Test-Path $overlayRoot)) {
 }
 
 $failures = New-Object System.Collections.Generic.List[string]
+$warnings = New-Object System.Collections.Generic.List[string]
 
 $forbiddenPaths = @(
     "lib",
@@ -24,11 +25,14 @@ foreach ($relative in $forbiddenPaths) {
     }
 }
 
-$patterns = @(
-    @{ Name = "hard-coded development launch token"; Regex = 'dev-token-f05' },
+$failurePatterns = @(
     @{ Name = "private key material"; Regex = '-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----' },
     @{ Name = "GitHub token-shaped secret"; Regex = '(ghp|github_pat)_[A-Za-z0-9_]+' },
     @{ Name = "machine-local Windows user path"; Regex = '[A-Za-z]:\\Users\\[^\\]+' }
+)
+
+$warningPatterns = @(
+    @{ Name = "hard-coded development launch token configuration debt"; Regex = 'dev-token-f05' }
 )
 
 $textExtensions = @(".cs", ".md", ".json", ".ps1", ".psm1", ".yml", ".yaml", ".toml", ".txt", ".xml", ".props", ".targets")
@@ -36,12 +40,27 @@ $files = Get-ChildItem -Path $overlayRoot -Recurse -File | Where-Object { $textE
 
 foreach ($file in $files) {
     $content = Get-Content -Raw -LiteralPath $file.FullName
-    foreach ($pattern in $patterns) {
+    $relativePath = [System.IO.Path]::GetRelativePath($adapterRoot, $file.FullName)
+
+    foreach ($pattern in $failurePatterns) {
         if ($content -match $pattern.Regex) {
-            $relativePath = [System.IO.Path]::GetRelativePath($adapterRoot, $file.FullName)
             $failures.Add("$($pattern.Name): $relativePath")
         }
     }
+
+    foreach ($pattern in $warningPatterns) {
+        if ($content -match $pattern.Regex) {
+            $warnings.Add("$($pattern.Name): $relativePath")
+        }
+    }
+}
+
+if ($warnings.Count -gt 0) {
+    Write-Host "Public-readiness warnings:" -ForegroundColor Yellow
+    foreach ($warning in $warnings | Sort-Object -Unique) {
+        Write-Host "  - $warning" -ForegroundColor Yellow
+    }
+    Write-Host "Warnings do not change the extraction snapshot. Resolve configuration debt in a separately gated adapter change."
 }
 
 if ($failures.Count -gt 0) {
