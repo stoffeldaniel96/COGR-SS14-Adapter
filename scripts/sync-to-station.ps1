@@ -65,7 +65,40 @@ function Compare-TreeState {
     return $differences
 }
 
-$allDifferences = New-Object System.Collections.Generic.List[string]
+function Get-AllDifferences {
+    $differences = New-Object System.Collections.Generic.List[string]
+
+    foreach ($mapping in $manifest.mappings) {
+        $source = Join-Path $adapterRoot $mapping.source
+        $destination = Join-Path $stationRoot $mapping.stationDestination
+
+        if (-not (Test-Path $source)) {
+            throw "Adapter source has not been extracted/populated: $($mapping.source)"
+        }
+
+        $expected = Get-TreeState $source
+        $actual = Get-TreeState $destination
+        foreach ($difference in Compare-TreeState $expected $actual $mapping.stationDestination) {
+            $differences.Add($difference)
+        }
+    }
+
+    return $differences
+}
+
+if ($VerifyOnly) {
+    $differences = Get-AllDifferences
+    if ($differences.Count -gt 0) {
+        Write-Host "Adapter/Station synchronization verification failed:" -ForegroundColor Red
+        foreach ($difference in $differences | Sort-Object -Unique) {
+            Write-Host "  - $difference" -ForegroundColor Red
+        }
+        exit 1
+    }
+
+    Write-Host "Adapter/Station source trees are synchronized."
+    exit 0
+}
 
 foreach ($mapping in $manifest.mappings) {
     $source = Join-Path $adapterRoot $mapping.source
@@ -73,15 +106,6 @@ foreach ($mapping in $manifest.mappings) {
 
     if (-not (Test-Path $source)) {
         throw "Adapter source has not been extracted/populated: $($mapping.source)"
-    }
-
-    if ($VerifyOnly) {
-        $expected = Get-TreeState $source
-        $actual = Get-TreeState $destination
-        foreach ($difference in Compare-TreeState $expected $actual $mapping.stationDestination) {
-            $allDifferences.Add($difference)
-        }
-        continue
     }
 
     if (Test-Path $destination) {
@@ -93,25 +117,15 @@ foreach ($mapping in $manifest.mappings) {
     Write-Host "Synchronized $($mapping.source) -> $($mapping.stationDestination)"
 }
 
-if ($VerifyOnly) {
-    if ($allDifferences.Count -gt 0) {
-        Write-Host "Adapter/Station synchronization verification failed:" -ForegroundColor Red
-        foreach ($difference in $allDifferences | Sort-Object -Unique) {
-            Write-Host "  - $difference" -ForegroundColor Red
-        }
-        exit 1
-    }
-
-    Write-Host "Adapter/Station source trees are synchronized."
-    exit 0
-}
-
-& git -C $adapterRoot rev-parse HEAD | Out-Null
-if ($LASTEXITCODE -ne 0) {
+$adapterCommit = (& git -C $adapterRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($adapterCommit)) {
     throw "Could not resolve adapter Git revision."
 }
-$adapterCommit = (& git -C $adapterRoot rev-parse HEAD).Trim()
+
 $stationCommitBeforeSync = (& git -C $stationRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($stationCommitBeforeSync)) {
+    throw "Could not resolve Station Git revision."
+}
 
 $version = [ordered]@{
     schemaVersion = 1
@@ -123,9 +137,10 @@ $version = [ordered]@{
 
 $version | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 (Join-Path $stationRoot "COGR-ADAPTER-VERSION.json")
 
-& $PSCommandPath -StationRepoPath $stationRoot -VerifyOnly
-if ($LASTEXITCODE -ne 0) {
-    throw "Post-sync verification failed."
+$postSyncDifferences = Get-AllDifferences
+if ($postSyncDifferences.Count -gt 0) {
+    $detail = ($postSyncDifferences | Sort-Object -Unique) -join [Environment]::NewLine
+    throw "Post-sync verification failed:$([Environment]::NewLine)$detail"
 }
 
 Write-Host "Station mirror synchronized to adapter commit $adapterCommit"
