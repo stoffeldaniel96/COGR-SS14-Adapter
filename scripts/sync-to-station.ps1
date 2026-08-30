@@ -48,11 +48,16 @@ function Get-TreeState {
     param([string] $Root)
 
     $state = @{}
-    if (-not (Test-Path $Root)) {
+    if (-not (Test-Path -LiteralPath $Root)) {
         return $state
     }
 
-    foreach ($file in Get-ChildItem -Path $Root -Recurse -File) {
+    if (Test-Path -LiteralPath $Root -PathType Leaf) {
+        $state["."] = (Get-FileHash -Algorithm SHA256 -LiteralPath $Root).Hash.ToLowerInvariant()
+        return $state
+    }
+
+    foreach ($file in Get-ChildItem -LiteralPath $Root -Recurse -File) {
         $relative = Get-PortableRelativePath -BasePath $Root -TargetPath $file.FullName
         $state[$relative] = (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash.ToLowerInvariant()
     }
@@ -93,7 +98,7 @@ function Get-AllDifferences {
         $source = Join-Path $adapterRoot $mapping.source
         $destination = Join-Path $stationRoot $mapping.stationDestination
 
-        if (-not (Test-Path $source)) {
+        if (-not (Test-Path -LiteralPath $source)) {
             throw "Adapter source has not been extracted/populated: $($mapping.source)"
         }
 
@@ -125,16 +130,16 @@ foreach ($mapping in $manifest.mappings) {
     $source = Join-Path $adapterRoot $mapping.source
     $destination = Join-Path $stationRoot $mapping.stationDestination
 
-    if (-not (Test-Path $source)) {
+    if (-not (Test-Path -LiteralPath $source)) {
         throw "Adapter source has not been extracted/populated: $($mapping.source)"
     }
 
-    if (Test-Path $destination) {
-        Remove-Item -Recurse -Force $destination
+    if (Test-Path -LiteralPath $destination) {
+        Remove-Item -Recurse -Force -LiteralPath $destination
     }
 
     New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
-    Copy-Item -Recurse -Force $source $destination
+    Copy-Item -Recurse -Force -LiteralPath $source -Destination $destination
     Write-Host "Synchronized $($mapping.source) -> $($mapping.stationDestination)"
 }
 
