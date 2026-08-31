@@ -101,9 +101,10 @@ public sealed partial class COGRBoundedPerceptionSystem
     }
 
     /// <summary>
-    /// Emits privileged adapter-only evidence for item/tool observations so live diagnostics can correlate COGR's coarse
+    /// Emits privileged adapter-only evidence for item/tool observations so deep live diagnostics can correlate COGR's coarse
     /// category with the actual SS14 entity that produced it. Native entity/prototype identity remains server-local and is
-    /// never added to the observation transported to cognition.
+    /// never added to the observation transported to cognition. This stays below ordinary INFO output because focused
+    /// perception can classify many items on every observation refresh.
     /// </summary>
     private void LogPrivilegedItemClassification(
         PerceptionRequest request,
@@ -120,7 +121,7 @@ public sealed partial class COGRBoundedPerceptionSystem
         var hasItemComponent = HasComp<ItemComponent>(candidate.Entity);
         var hasToolComponent = HasComp<ToolComponent>(candidate.Entity);
 
-        _sawmill.Info(
+        _sawmill.Debug(
             "Privileged item perception: tick={0} agent={1} entity={2} prototype={3} category={4} envRef={5} anchored={6} contained={7} itemComponent={8} toolComponent={9} distance={10}",
             currentTick.Value,
             request.AgentId,
