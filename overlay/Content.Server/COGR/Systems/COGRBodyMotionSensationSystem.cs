@@ -618,7 +618,7 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
         return ProprioceptiveMotionDurationBand.Extended;
     }
 
-    private static readonly record struct MotionAuthorityKey(
+    private readonly record struct MotionAuthorityKey(
         ConnectionId ConnectionId,
         AgentId AgentId,
         BodyId BodyId,
@@ -635,29 +635,20 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
         public MotionAuthorityKey Key => new(ConnectionId, AgentId, BodyId, BodyGeneration);
     }
 
-    private sealed class PendingMotion
+    private sealed class PendingMotion(
+        MotionAuthorityKey authority,
+        EntityUid parent,
+        Angle departureRotation,
+        TimeSpan firstObservedAt)
     {
-        public PendingMotion(
-            MotionAuthorityKey authority,
-            EntityUid parent,
-            Angle departureRotation,
-            TimeSpan firstObservedAt)
-        {
-            Authority = authority;
-            Parent = parent;
-            DepartureRotation = departureRotation;
-            FirstObservedAt = firstObservedAt;
-            LastObservedAt = firstObservedAt;
-        }
-
-        public MotionAuthorityKey Authority { get; }
-        public EntityUid Parent { get; }
-        public Angle DepartureRotation { get; }
-        public TimeSpan FirstObservedAt { get; }
-        public TimeSpan LastObservedAt { get; set; }
+        public MotionAuthorityKey Authority { get; } = authority;
+        public EntityUid Parent { get; } = parent;
+        public Angle DepartureRotation { get; } = departureRotation;
+        public TimeSpan FirstObservedAt { get; } = firstObservedAt;
+        public TimeSpan LastObservedAt { get; set; } = firstObservedAt;
         public Vector2 DepartureBodyTranslation { get; set; }
         public double AccumulatedRotationRadians { get; set; }
         public bool HasTranslation { get; set; }
-        public BodyRelativeBearing LastInstantaneousBearing { get; set; }
+        public BodyRelativeBearing LastInstantaneousBearing { get; set; } = BodyRelativeBearing.Unknown;
     }
 }
