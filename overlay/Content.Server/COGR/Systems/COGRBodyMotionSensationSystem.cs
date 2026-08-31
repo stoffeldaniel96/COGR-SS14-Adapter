@@ -146,7 +146,7 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
         }
 
         var parentDelta = args.NewPosition.Position - args.OldPosition.Position;
-        var rotationDelta = SignedAngleDelta(args.OldRotation, args.NewRotation);
+        var rotationDelta = SignedCognitiveAngleDelta(args.OldRotation, args.NewRotation);
         var hasTranslation = parentDelta.LengthSquared() >= TranslationNoiseFloorSquared;
         var hasRotation = Math.Abs(rotationDelta) >= RotationNoiseFloorRadians;
         if (!hasTranslation && !hasRotation)
@@ -580,14 +580,18 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
 
     private static bool IsDirectional(BodyRelativeBearing bearing) => BearingSector(bearing) >= 0;
 
-    private static double SignedAngleDelta(Angle previous, Angle current)
+    private static double SignedCognitiveAngleDelta(Angle previous, Angle current)
     {
-        var delta = current.Theta - previous.Theta;
-        while (delta <= -Math.PI)
-            delta += Math.Tau;
-        while (delta > Math.PI)
-            delta -= Math.Tau;
-        return delta;
+        // Robust/Station positive native Theta rotates local +X toward parent +Y. Under the established
+        // COGR body frame (+X forward, +Y left), that is a leftward/counter-clockwise owner turn.
+        // COGR proprioceptive RotationOctants deliberately use the opposite sign: positive is a
+        // rightward/clockwise owner turn. Translate handedness here at the environment boundary.
+        var nativeDelta = current.Theta - previous.Theta;
+        while (nativeDelta <= -Math.PI)
+            nativeDelta += Math.Tau;
+        while (nativeDelta > Math.PI)
+            nativeDelta -= Math.Tau;
+        return -nativeDelta;
     }
 
     private static int QuantizeRotationOctants(double rotationRadians)
@@ -614,7 +618,7 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
         return ProprioceptiveMotionDurationBand.Extended;
     }
 
-    private readonly record struct MotionAuthorityKey(
+    private static readonly record struct MotionAuthorityKey(
         ConnectionId ConnectionId,
         AgentId AgentId,
         BodyId BodyId,
@@ -631,20 +635,29 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
         public MotionAuthorityKey Key => new(ConnectionId, AgentId, BodyId, BodyGeneration);
     }
 
-    private sealed class PendingMotion(
-        MotionAuthorityKey authority,
-        EntityUid parent,
-        Angle departureRotation,
-        TimeSpan firstObservedAt)
+    private sealed class PendingMotion
     {
-        public MotionAuthorityKey Authority { get; } = authority;
-        public EntityUid Parent { get; } = parent;
-        public Angle DepartureRotation { get; } = departureRotation;
-        public TimeSpan FirstObservedAt { get; } = firstObservedAt;
-        public TimeSpan LastObservedAt { get; set; } = firstObservedAt;
+        public PendingMotion(
+            MotionAuthorityKey authority,
+            EntityUid parent,
+            Angle departureRotation,
+            TimeSpan firstObservedAt)
+        {
+            Authority = authority;
+            Parent = parent;
+            DepartureRotation = departureRotation;
+            FirstObservedAt = firstObservedAt;
+            LastObservedAt = firstObservedAt;
+        }
+
+        public MotionAuthorityKey Authority { get; }
+        public EntityUid Parent { get; }
+        public Angle DepartureRotation { get; }
+        public TimeSpan FirstObservedAt { get; }
+        public TimeSpan LastObservedAt { get; set; }
         public Vector2 DepartureBodyTranslation { get; set; }
         public double AccumulatedRotationRadians { get; set; }
         public bool HasTranslation { get; set; }
-        public BodyRelativeBearing LastInstantaneousBearing { get; set; } = BodyRelativeBearing.Unknown;
+        public BodyRelativeBearing LastInstantaneousBearing { get; set; }
     }
 }
