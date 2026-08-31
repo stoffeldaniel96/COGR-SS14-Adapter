@@ -8,50 +8,23 @@ using Robust.Shared.Timing;
 
 namespace Content.Client.COGR;
 
-/// <summary>Client-only transient visualization of privileged COGR spatial debug data.</summary>
+/// <summary>Client-only admin visualization of one selected Coggent's cognition-owned spatial beliefs.</summary>
 public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
 {
-    private static readonly TimeSpan TargetLifetime = TimeSpan.FromSeconds(1.75);
-    private static readonly TimeSpan PointerLifetime = TimeSpan.FromSeconds(2.0);
+    private static readonly TimeSpan TargetLifetime = TimeSpan.FromSeconds(2.0);
     private static readonly TimeSpan PathLifetime = TimeSpan.FromSeconds(2.0);
 
     [Dependency] private IOverlayManager _overlayManager = default!;
     [Dependency] private IGameTiming _timing = default!;
 
     private readonly Dictionary<string, TimedTarget> _targets = new(StringComparer.Ordinal);
-    private readonly List<TimedPointer> _pointers = [];
     private readonly Dictionary<ulong, TimedPath> _paths = [];
-    private bool _enabled;
+    private string? _trackedAgentId;
 
-    public bool Enabled
-    {
-        get => _enabled;
-        set
-        {
-            if (_enabled == value)
-                return;
-
-            _enabled = value;
-            if (_enabled)
-            {
-                if (!_overlayManager.HasOverlay<COGRSpatialVisualizationOverlay>())
-                    _overlayManager.AddOverlay(new COGRSpatialVisualizationOverlay(this));
-            }
-            else
-            {
-                _overlayManager.RemoveOverlay<COGRSpatialVisualizationOverlay>();
-                Clear();
-            }
-
-            RaiseNetworkEvent(new RequestCOGRSpatialVisualizationMessage
-            {
-                Enabled = _enabled,
-            });
-        }
-    }
+    public bool Enabled => _trackedAgentId is not null;
+    public string? TrackedAgentId => _trackedAgentId;
 
     internal Dictionary<string, TimedTarget>.ValueCollection Targets => _targets.Values;
-    internal List<TimedPointer> Pointers => _pointers;
     internal Dictionary<ulong, TimedPath>.ValueCollection Paths => _paths.Values;
 
     public override void Initialize()
@@ -62,50 +35,99 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
 
     public override void Shutdown()
     {
-        if (_enabled)
+        StopTracking();
+        base.Shutdown();
+    }
+
+    /// <summary>Begins observing one exact Coggent. Switching agents first retires the previous observer scope.</summary>
+    public void TrackAgent(string agentId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(agentId);
+        if (!Guid.TryParse(agentId, out var parsed) || parsed == Guid.Empty)
+            throw new ArgumentException("COGR spatial visualization requires an assigned agent UUID.", nameof(agentId));
+
+        var canonical = parsed.ToString("D");
+        if (string.Equals(_trackedAgentId, canonical, StringComparison.Ordinal))
+            return;
+
+        if (_trackedAgentId is not null)
         {
             RaiseNetworkEvent(new RequestCOGRSpatialVisualizationMessage
             {
                 Enabled = false,
+                AgentId = _trackedAgentId,
             });
         }
 
-        _enabled = false;
+        _trackedAgentId = canonical;
+        Clear();
+        if (!_overlayManager.HasOverlay<COGRSpatialVisualizationOverlay>())
+            _overlayManager.AddOverlay(new COGRSpatialVisualizationOverlay(this));
+
+        RaiseNetworkEvent(new RequestCOGRSpatialVisualizationMessage
+        {
+            Enabled = true,
+            AgentId = canonical,
+        });
+    }
+
+    /// <summary>Stops the current observer scope and clears all transient debug render state.</summary>
+    public void StopTracking()
+    {
+        if (_trackedAgentId is { } agentId)
+        {
+            RaiseNetworkEvent(new RequestCOGRSpatialVisualizationMessage
+            {
+                Enabled = false,
+                AgentId = agentId,
+            });
+        }
+
+        _trackedAgentId = null;
         _overlayManager.RemoveOverlay<COGRSpatialVisualizationOverlay>();
         Clear();
-        base.Shutdown();
     }
 
     public override void Update(float frameTime)
     {
         base.Update(frameTime);
-        if (!_enabled)
+        if (!Enabled)
             return;
 
+        // Lifetimes are disconnect/failure containment only. Normal deletion is authoritative full-frame reconciliation in
+        // OnVisualizationMessage, so a stationary belief marker remains visible as long as Runtime continues reporting it.
         var now = _timing.RealTime;
         foreach (var key in _targets.Where(pair => pair.Value.ExpiresAt <= now).Select(static pair => pair.Key).ToArray())
             _targets.Remove(key);
         foreach (var sequence in _paths.Where(pair => pair.Value.ExpiresAt <= now).Select(static pair => pair.Key).ToArray())
             _paths.Remove(sequence);
-        _pointers.RemoveAll(pointer => pointer.ExpiresAt <= now);
     }
 
     private void OnVisualizationMessage(COGRSpatialVisualizationMessage message)
     {
-        if (!_enabled)
+        if (_trackedAgentId is null
+            || !string.Equals(message.AgentId, _trackedAgentId, StringComparison.OrdinalIgnoreCase))
+        {
             return;
+        }
 
         var now = _timing.RealTime;
+        var currentKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var target in message.Targets)
         {
-            if (string.IsNullOrWhiteSpace(target.AgentId) || string.IsNullOrWhiteSpace(target.TargetId))
+            if (!string.Equals(target.AgentId, _trackedAgentId, StringComparison.OrdinalIgnoreCase)
+                || string.IsNullOrWhiteSpace(target.TargetId))
+            {
                 continue;
+            }
 
             var key = string.Concat(target.AgentId, ":", target.TargetId);
+            currentKeys.Add(key);
             _targets[key] = new TimedTarget(target, now + TargetLifetime);
-            if (target.PulsePointer)
-                _pointers.Add(new TimedPointer(target.Belief, now + PointerLifetime));
         }
+
+        foreach (var key in _targets.Keys.Where(key => !currentKeys.Contains(key)).ToArray())
+            _targets.Remove(key);
 
         foreach (var path in message.Paths)
         {
@@ -118,23 +140,17 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
     private void Clear()
     {
         _targets.Clear();
-        _pointers.Clear();
         _paths.Clear();
     }
 
     internal sealed record TimedTarget(COGRSpatialVisualizationTarget Target, TimeSpan ExpiresAt);
-    internal sealed record TimedPointer(MapCoordinates Coordinates, TimeSpan ExpiresAt);
     internal sealed record TimedPath(MapCoordinates[] Points, TimeSpan ExpiresAt);
 }
 
-/// <summary>World-space renderer for COGR belief-vs-reality and remembered-path diagnostics.</summary>
+/// <summary>World-space renderer for cognition-owned belief positions and remembered-route diagnostics.</summary>
 public sealed class COGRSpatialVisualizationOverlay : Overlay
 {
-    private const float EndpointMarkerRadius = 0.07f;
-    private static readonly Vector2 PointerLeft = new(-0.18f, 0.34f);
-    private static readonly Vector2 PointerRight = new(0.18f, 0.34f);
-    private static readonly Vector2 PointerStem = new(0f, 0.52f);
-
+    private const float EndpointMarkerRadius = 0.09f;
     private readonly COGRSpatialVisualizationSystem _system;
 
     public COGRSpatialVisualizationOverlay(COGRSpatialVisualizationSystem system)
@@ -148,31 +164,15 @@ public sealed class COGRSpatialVisualizationOverlay : Overlay
     {
         var handle = args.WorldHandle;
 
+        // Blue is deliberately reserved for COGR's own reported spatial belief. No authoritative target location is drawn
+        // in this normal acceptance-testing view, so a cognitive spatial error remains visible instead of being repaired or
+        // visually conflated with Station truth.
         foreach (var timed in _system.Targets)
         {
             var target = timed.Target;
-            if (!target.IsTracked
-                || target.Body.MapId != args.MapId
-                || target.Belief.MapId != args.MapId)
-            {
+            if (target.Belief.MapId != args.MapId)
                 continue;
-            }
-
-            handle.DrawLine(target.Body.Position, target.Belief.Position, Color.Yellow);
-            DrawCross(handle, target.Belief.Position, Color.Yellow);
-
-            if (target.HasActual && target.Actual.MapId == args.MapId)
-            {
-                handle.DrawLine(target.Body.Position, target.Actual.Position, Color.Red);
-                DrawCross(handle, target.Actual.Position, Color.Red);
-            }
-        }
-
-        foreach (var pointer in _system.Pointers)
-        {
-            if (pointer.Coordinates.MapId != args.MapId)
-                continue;
-            DrawPointer(handle, pointer.Coordinates.Position);
+            DrawCross(handle, target.Belief.Position, Color.Blue);
         }
 
         foreach (var path in _system.Paths)
@@ -194,12 +194,5 @@ public sealed class COGRSpatialVisualizationOverlay : Overlay
         var vertical = new Vector2(0f, EndpointMarkerRadius);
         handle.DrawLine(center - horizontal, center + horizontal, color);
         handle.DrawLine(center - vertical, center + vertical, color);
-    }
-
-    private static void DrawPointer(DrawingHandleWorld handle, Vector2 point)
-    {
-        handle.DrawLine(point + PointerLeft, point, Color.Yellow);
-        handle.DrawLine(point + PointerRight, point, Color.Yellow);
-        handle.DrawLine(point + PointerStem, point + new Vector2(0f, 0.12f), Color.Yellow);
     }
 }

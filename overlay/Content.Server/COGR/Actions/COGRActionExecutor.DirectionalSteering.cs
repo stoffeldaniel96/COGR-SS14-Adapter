@@ -1,12 +1,9 @@
-using System.Linq;
 using System.Numerics;
-using System.Text.Json;
 using COGR.Core.Actions;
 using COGR.Core.Actions.Parameters;
 using COGR.Core.Identifiers;
 using COGR.Core.Perception;
 using COGR.Core.Time;
-using Content.Server.COGR.Systems;
 using Content.Server.NPC.Components;
 using Content.Server.NPC.Events;
 using Content.Server.NPC.Systems;
@@ -23,7 +20,6 @@ public sealed partial class COGRActionExecutor
     private const int DirectionalSteeringMaximumStallChecks = 6;
 
     [Dependency] private NPCSteeringSystem _npcSteering = default!;
-    [Dependency] private COGRSemanticReplicaSystem _semanticReplica = default!;
 
     private readonly Dictionary<ActionProposalId, ActiveDirectionalSteering> _directionalSteering = new();
     private readonly Dictionary<EntityUid, ActionProposalId> _directionalSteeringByEntity = new();
@@ -106,91 +102,26 @@ public sealed partial class COGRActionExecutor
             LastProgressCheckTick = startTick,
         };
 
-        // Temporary live-acceptance diagnostic. Directional steering intentionally has no native seek target, so expose
-        // the exact Station realization that does exist: current SS14 coordinates, body rotation, the parent-frame direction
-        // injected into NPC steering, and the bounded progress horizon. The horizon point is diagnostic-only and is never
-        // supplied to pathfinding/steering as a destination.
-        var diagnosticHorizonPoint = active.StartPosition + active.ParentDirection * active.ProgressHorizon;
-        _sawmill.Info(
-            "COGR relative steering realization: proposal={0} agent={1} body={2} causalTrace={3} startCoordinates={4} parent={5} localRotation={6} bearing={7} parentDirection=({8:F4},{9:F4}) progressHorizon={10:F3} diagnosticHorizonPoint=({11:F3},{12:F3}) seekTarget=false",
-            attempt.ProposalId,
-            attempt.AgentId,
-            attempt.BodyId,
-            attempt.CausalTraceId,
-            xform.Coordinates,
-            xform.ParentUid,
-            xform.LocalRotation,
-            parameters.Bearing,
-            active.ParentDirection.X,
-            active.ParentDirection.Y,
-            active.ProgressHorizon,
-            diagnosticHorizonPoint.X,
-            diagnosticHorizonPoint.Y);
-
-        LogAdapterLandmarkRealization(attempt, xform);
+        // Keep the old realization detail available only behind the explicit high-volume adapter trace switch. Normal live
+        // acceptance now uses the agent-scoped blue belief overlay and compact cognitive navigation trace instead.
+        if (COGRAdapterTrace.Enabled)
+        {
+            var diagnosticHorizonPoint = active.StartPosition + active.ParentDirection * active.ProgressHorizon;
+            _sawmill.Debug(
+                "COGR steer: proposal={0} agent={1} bearing={2} direction=({3:F3},{4:F3}) horizon={5:F3} endpoint=({6:F3},{7:F3})",
+                attempt.ProposalId,
+                attempt.AgentId,
+                parameters.Bearing,
+                active.ParentDirection.X,
+                active.ParentDirection.Y,
+                active.ProgressHorizon,
+                diagnosticHorizonPoint.X,
+                diagnosticHorizonPoint.Y);
+        }
 
         _directionalSteering[attempt.ProposalId] = active;
         _directionalSteeringByEntity[entity.Value] = attempt.ProposalId;
         return ActionExecutionResult.Started();
-    }
-
-    /// <summary>
-    /// Logs the adapter-authoritative realization of the exact current bounded replica at the moment a COGR relative
-    /// steering action starts. This Station-only diagnostic resolves opaque references under the accepted action's exact
-    /// authority and never transmits host coordinates or entity identity back into cognition.
-    /// </summary>
-    private void LogAdapterLandmarkRealization(ActionAttempt attempt, TransformComponent actorTransform)
-    {
-        var observations = _semanticReplica.GetCurrentObservationsForDiagnostic(
-            attempt.AuthorityLease.ConnectionId,
-            attempt.AgentId,
-            attempt.BodyId,
-            attempt.AuthorityLease.Generation);
-
-        var landmarks = observations.Select(observation =>
-        {
-            var target = _referenceResolver?.Invoke(attempt, observation.EnvironmentRef);
-            TransformComponent? targetTransform = null;
-            if (target.HasValue)
-                _ = TryComp(target.Value, out targetTransform);
-
-            return new
-            {
-                environmentReference = observation.EnvironmentRef.ToString(),
-                category = observation.Category ?? "none",
-                projectedLocation = observation.Location?.ToString(),
-                features = observation.Features.Select(static feature => new
-                {
-                    category = feature.Category,
-                    type = feature.FeatureType,
-                    value = feature.Value?.ToString(),
-                    confidence = feature.Confidence,
-                }).ToArray(),
-                resolved = targetTransform is not null,
-                coordinates = targetTransform?.Coordinates.ToString(),
-                parent = targetTransform?.ParentUid.ToString(),
-                localX = targetTransform?.LocalPosition.X,
-                localY = targetTransform?.LocalPosition.Y,
-            };
-        }).ToArray();
-
-        var json = JsonSerializer.Serialize(new
-        {
-            kind = "remembered_navigation_adapter_landmarks",
-            proposalId = attempt.ProposalId.ToString(),
-            agentId = attempt.AgentId.ToString(),
-            actor = new
-            {
-                coordinates = actorTransform.Coordinates.ToString(),
-                parent = actorTransform.ParentUid.ToString(),
-                localX = actorTransform.LocalPosition.X,
-                localY = actorTransform.LocalPosition.Y,
-                localRotation = actorTransform.LocalRotation.ToString(),
-            },
-            landmarks,
-        });
-
-        _sawmill.Info("COGR route adapter landmarks: {0}", json);
     }
 
     private void OnCogRDirectionalSteering(
