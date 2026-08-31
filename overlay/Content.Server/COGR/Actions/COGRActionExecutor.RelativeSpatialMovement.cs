@@ -22,9 +22,36 @@ public sealed partial class COGRActionExecutor
         if (parameters.Maintain)
         {
             var replica = EntityManager.System<COGRSemanticReplicaSystem>();
+            bool? previousObserved = null;
             isCurrentlyObserved = reference =>
-                replica.IsReferenceCurrentlyVisuallyAvailable(attempt, reference);
+            {
+                var observed = replica.IsReferenceCurrentlyVisuallyAvailable(attempt, reference);
+                if (Content.Server.COGR.COGRAdapterTrace.Enabled && previousObserved != observed)
+                {
+                    _sawmill.Info(
+                        "[PROMPTED] relative-spatial visibility proposal={0} body={1} targetRef={2} observed={3}",
+                        attempt.ProposalId,
+                        attempt.BodyId,
+                        reference,
+                        observed);
+                }
+
+                previousObserved = observed;
+                return observed;
+            };
             hasCurrentAuthority = () => ValidateAuthority(attempt).IsValid;
+        }
+
+        if (Content.Server.COGR.COGRAdapterTrace.Enabled)
+        {
+            var resolvedTarget = _referenceResolver(attempt, parameters.TargetRef);
+            _sawmill.Info(
+                "[PROMPTED] relative-spatial target-binding proposal={0} body={1} targetRef={2} target={3} maintain={4}",
+                attempt.ProposalId,
+                attempt.BodyId,
+                parameters.TargetRef,
+                resolvedTarget?.ToString() ?? "<null>",
+                parameters.Maintain);
         }
 
         return _relativeSpatialMovementHandler.Start(
