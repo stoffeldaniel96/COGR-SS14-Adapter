@@ -40,16 +40,18 @@ public static class COGRSpatialPolicy
     public const float MaximumStepDistance = 4.0f;
 
     /// <summary>
-    /// Maximum net progress one direction-only steering action may make before runtime cognition must reassess current
-    /// scene evidence. This is an execution-containment horizon, not a destination distance: Station never constructs a
-    /// target point at this range and native context steering may deviate locally around collision while preserving the
-    /// requested qualitative heading.
+    /// Maximum net progress one direction-only steering action may make before Station requires another cognitive
+    /// commitment. A body-relative steering bearing is justified by current actor-relative evidence only within the same
+    /// embodied visual horizon that supplied that evidence, so the containment ceiling matches that horizon instead of
+    /// inventing a shorter locomotor stride. Runtime cognition may cancel and recompose the action earlier whenever fresh
+    /// evidence contradicts the committed bearing or maintained relation. This remains an execution-containment horizon,
+    /// not a destination distance: Station never constructs a hidden target point at this range.
     /// </summary>
-    public const float MaximumDirectionalSteeringProgress = 2.75f;
+    public const float MaximumDirectionalSteeringProgress = DefaultVisualHorizon;
 
     /// <summary>
-    /// Compatibility value retained for existing diagnostics/tests. Direction-only continuation now uses the same bounded
-    /// progress horizon directly rather than projecting a pseudo-destination at that distance.
+    /// Compatibility value retained for existing diagnostics/tests. Direction-only continuation uses the same bounded
+    /// perceptual-evidence horizon directly rather than projecting a pseudo-destination at that distance.
     /// </summary>
     public const float BlindContinuationDistance = MaximumDirectionalSteeringProgress;
 
