@@ -7,16 +7,19 @@ namespace Content.Tests.COGR;
 public sealed class COGRSpatialPolicyTests
 {
     [Test]
-    public void LocalPathfindingHorizon_MatchesPerceptionHorizon_WhileStepRemainsShort()
+    public void LocalPathfindingAndDirectionalSteering_MatchPerceptionHorizon_WhileStepRemainsShort()
     {
         Assert.That(
             COGRSpatialPolicy.MaximumLocalPathfindingDistance,
+            Is.EqualTo(COGRSpatialPolicy.DefaultVisualHorizon));
+        Assert.That(
+            COGRSpatialPolicy.MaximumDirectionalSteeringProgress,
             Is.EqualTo(COGRSpatialPolicy.DefaultVisualHorizon));
         Assert.That(COGRSpatialPolicy.MaximumLocalPathfindingDistance, Is.EqualTo(12.0f));
         Assert.That(COGRSpatialPolicy.MaximumStepDistance, Is.EqualTo(4.0f));
         Assert.That(
             COGRSpatialPolicy.MaximumStepDistance,
-            Is.LessThan(COGRSpatialPolicy.MaximumLocalPathfindingDistance));
+            Is.LessThan(COGRSpatialPolicy.MaximumDirectionalSteeringProgress));
     }
 
     [Test]
@@ -31,6 +34,6 @@ public sealed class COGRSpatialPolicyTests
             Is.EqualTo(COGRSpatialPolicy.MaximumLocalPathfindingDistance));
         Assert.That(
             COGRSpatialPolicy.BlindContinuationDistance,
-            Is.LessThan(COGRSpatialPolicy.MaximumLocalPathfindingDistance));
+            Is.EqualTo(COGRSpatialPolicy.DefaultVisualHorizon));
     }
 }
