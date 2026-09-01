@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Numerics;
 using COGR.Core.Actions;
 using COGR.Core.Actions.Parameters;
