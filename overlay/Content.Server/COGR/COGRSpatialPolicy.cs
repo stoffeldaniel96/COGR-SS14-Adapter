@@ -40,20 +40,24 @@ public static class COGRSpatialPolicy
     public const float MaximumStepDistance = 4.0f;
 
     /// <summary>
-    /// Maximum net progress one direction-only steering action may make before Station requires another cognitive
-    /// commitment. A body-relative steering bearing is justified by current actor-relative evidence only within the same
-    /// embodied visual horizon that supplied that evidence, so the containment ceiling matches that horizon instead of
-    /// inventing a shorter locomotor stride. Runtime cognition may cancel and recompose the action earlier whenever fresh
-    /// evidence contradicts the committed bearing or maintained relation. This remains an execution-containment horizon,
-    /// not a destination distance: Station never constructs a hidden target point at this range.
+    /// Hard upper bound on one cognition-authored movement.steer_relative travel request that SS14 will realize from current
+    /// actor-relative evidence. This is a capability/planning ceiling, not the distance every steering action travels. Runtime
+    /// cognition chooses the actual requested extent, which may be substantially smaller (for example 0.1 BU) or as large as
+    /// this ceiling when current evidence and procedure policy justify it.
     /// </summary>
-    public const float MaximumDirectionalSteeringProgress = DefaultVisualHorizon;
+    public const float MaximumDirectionalSteeringRequestDistance = DefaultVisualHorizon;
+
+    /// <summary>
+    /// Compatibility alias retained for existing diagnostics while callers migrate to the request-ceiling name. It must not be
+    /// used as an implicit/default steering pulse size.
+    /// </summary>
+    public const float MaximumDirectionalSteeringProgress = MaximumDirectionalSteeringRequestDistance;
 
     /// <summary>
     /// Compatibility value retained for existing diagnostics/tests. Direction-only continuation uses the same bounded
-    /// perceptual-evidence horizon directly rather than projecting a pseudo-destination at that distance.
+    /// perceptual-evidence ceiling rather than projecting a pseudo-destination at that distance.
     /// </summary>
-    public const float BlindContinuationDistance = MaximumDirectionalSteeringProgress;
+    public const float BlindContinuationDistance = MaximumDirectionalSteeringRequestDistance;
 
     /// <summary>
     /// Compatibility value retained for older callers. Moving targets are now replanned incrementally instead of being
