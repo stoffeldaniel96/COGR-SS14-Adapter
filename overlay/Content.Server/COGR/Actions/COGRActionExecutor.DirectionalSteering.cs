@@ -39,7 +39,7 @@ public sealed partial class COGRActionExecutor
         {
             return ActionExecutionResult.Failed(
                 ActionFailureReason.Unspecified,
-                "Invalid relative steering parameters: supply a finite non-zero continuous direction, a directional octant bearing, or both");
+                "Invalid or non-planar relative steering parameters for SS14: supply a realizable continuous direction, a directional octant bearing, or both");
         }
 
         var entity = ResolveDirectionalSteeringBody(attempt.BodyId);
@@ -87,8 +87,10 @@ public sealed partial class COGRActionExecutor
         // A direction-only objective deliberately has no destination coordinate. Register the current coordinates only as
         // the NPC steering system's required live-body anchor; the event override below disables coordinate seeking and
         // contributes the cognition-owned direction directly to native context steering alongside collision/separation
-        // danger. Continuous input remains continuous. A supplied octant is either a cheap standalone steering intent or a
-        // coarse sector constraint on the continuous vector; neither form requires body facing to equal locomotion direction.
+        // danger. Continuous planar input remains continuous. A supplied octant is either a cheap standalone steering intent
+        // or a coarse sector constraint on the continuous vector; neither form requires body facing to equal locomotion
+        // direction. The generic Runtime contract may express +Z/-Z, but this planar SS14 action fails closed rather than
+        // silently dropping vertical intent.
         _npcSteering.Unregister(entity.Value);
         EnsureComp<ActiveNPCComponent>(entity.Value);
         var steering = _npcSteering.Register(entity.Value, xform.Coordinates);
@@ -323,8 +325,13 @@ public sealed partial class COGRActionExecutor
             return false;
 
         var hasContinuous = parameters.Direction.HasValue;
-        if (hasContinuous && !parameters.Direction.Value.IsDirectional)
+        if (hasContinuous
+            && (!parameters.Direction.Value.IsDirectional || !parameters.Direction.Value.IsPlanar))
+        {
+            // SS14's ordinary steer_relative realization is planar. Vertical cognitive intent belongs to a different
+            // embodiment action (climb, descend, crawl-under, etc.) rather than being silently projected onto the floor plane.
             return false;
+        }
 
         if (!hasContinuous && !hasBearing)
             return false;
