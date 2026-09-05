@@ -49,6 +49,7 @@ public sealed partial class COGRActionExecutor
         _movementHandler.CleanupMovement(proposalId, bodyId, EntityManager);
         _relativeSpatialMovementHandler.CleanupMovement(proposalId, EntityManager);
         CleanupDirectionalSteering(proposalId);
+        CleanupProjectedObjectiveSteering(proposalId);
         CleanupAcquisition(proposalId);
     }
 }
