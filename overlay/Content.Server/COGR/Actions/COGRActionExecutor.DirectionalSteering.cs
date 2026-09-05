@@ -42,7 +42,7 @@ public sealed partial class COGRActionExecutor
                 "Invalid relative steering parameters");
         }
 
-        var entity = ResolveDirectionalSteeringBody(attempt.BodyId);
+        var entity = ResolveSteeringBody(attempt.BodyId);
         if (!entity.HasValue)
         {
             return ActionExecutionResult.Failed(
@@ -190,7 +190,7 @@ public sealed partial class COGRActionExecutor
                 "Body entity was deleted during directional steering");
         }
 
-        var currentBody = ResolveDirectionalSteeringBody(active.BodyId);
+        var currentBody = ResolveSteeringBody(active.BodyId);
         if (currentBody != active.Entity)
         {
             CleanupDirectionalSteering(active.ProposalId);
@@ -293,7 +293,7 @@ public sealed partial class COGRActionExecutor
         }
     }
 
-    private EntityUid? ResolveDirectionalSteeringBody(BodyId bodyId)
+    private EntityUid? ResolveSteeringBody(BodyId bodyId)
     {
         var query = AllEntityQuery<COGRControlledComponent>();
         while (query.MoveNext(out var uid, out var controlled))
