@@ -47,7 +47,7 @@ public sealed partial class COGRActionExecutor
                 failureDetail ?? "Invalid projected body-relative steering objective");
         }
 
-        var entity = ResolveDirectionalSteeringBody(attempt.BodyId);
+        var entity = ResolveSteeringBody(attempt.BodyId);
         if (!entity.HasValue)
         {
             return ActionExecutionResult.Failed(
@@ -118,7 +118,6 @@ public sealed partial class COGRActionExecutor
             TargetPosition = targetPosition,
             LastSampledPosition = xform.LocalPosition,
             LastProgressPosition = xform.LocalPosition,
-            DirectDistance = directDistance,
             ArrivalTolerance = arrivalTolerance,
             MinimumProgressPerCheck = minimumProgress,
             MaximumTravelDistance = COGRSpatialPolicy.GetMaximumLocalTravelDistance(directDistance),
@@ -183,7 +182,7 @@ public sealed partial class COGRActionExecutor
                 "Body entity was deleted during projected objective steering");
         }
 
-        var currentBody = ResolveDirectionalSteeringBody(active.BodyId);
+        var currentBody = ResolveSteeringBody(active.BodyId);
         if (currentBody != active.Entity)
         {
             CleanupProjectedObjectiveSteering(active.ProposalId);
@@ -308,17 +307,6 @@ public sealed partial class COGRActionExecutor
         }
     }
 
-    private void CleanupAllProjectedObjectiveSteeringForBody(BodyId bodyId)
-    {
-        var proposals = _projectedObjectiveSteering
-            .Where(pair => pair.Value.BodyId == bodyId)
-            .Select(static pair => pair.Key)
-            .ToArray();
-
-        foreach (var proposal in proposals)
-            CleanupProjectedObjectiveSteering(proposal);
-    }
-
     private static CapabilityValidationResult ValidateProjectedObjectiveSteeringParams(ReadOnlyMemory<byte> parameters)
     {
         var parsed = ActionParameterSerializer.Deserialize<SteerToBodyRelativePointActionParams>(parameters);
@@ -419,7 +407,6 @@ public sealed partial class COGRActionExecutor
         internal required Vector2 TargetPosition { get; init; }
         internal required Vector2 LastSampledPosition { get; set; }
         internal required Vector2 LastProgressPosition { get; set; }
-        internal required float DirectDistance { get; init; }
         internal required float ArrivalTolerance { get; init; }
         internal required float MinimumProgressPerCheck { get; init; }
         internal required float MaximumTravelDistance { get; init; }
