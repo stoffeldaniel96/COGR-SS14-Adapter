@@ -30,8 +30,17 @@ public sealed partial class COGRActionExecutor
     private ActionExecutionResult StartProjectedObjectiveSteering(ActionAttempt attempt)
     {
         var parameters = ActionParameterSerializer.Deserialize<SteerToBodyRelativePointActionParams>(attempt.Parameters);
-        if (parameters is null
-            || !TryResolvePlanarObjectiveNativeOffset(parameters.ObjectiveOffset, out var ownerRelativeNativeOffset, out var failureDetail))
+        if (parameters is null)
+        {
+            return ActionExecutionResult.Failed(
+                ActionFailureReason.Unspecified,
+                "Invalid projected body-relative steering objective");
+        }
+
+        if (!TryResolvePlanarObjectiveNativeOffset(
+                parameters.ObjectiveOffset,
+                out var ownerRelativeNativeOffset,
+                out var failureDetail))
         {
             return ActionExecutionResult.Failed(
                 ActionFailureReason.Unspecified,
@@ -313,8 +322,14 @@ public sealed partial class COGRActionExecutor
     private static CapabilityValidationResult ValidateProjectedObjectiveSteeringParams(ReadOnlyMemory<byte> parameters)
     {
         var parsed = ActionParameterSerializer.Deserialize<SteerToBodyRelativePointActionParams>(parameters);
-        if (parsed is null
-            || !TryResolvePlanarObjectiveNativeOffset(parsed.ObjectiveOffset, out _, out var detail))
+        if (parsed is null)
+        {
+            return CapabilityValidationResult.Invalid(
+                ActionRejectionReason.InvalidParameters,
+                "Invalid projected body-relative steering objective");
+        }
+
+        if (!TryResolvePlanarObjectiveNativeOffset(parsed.ObjectiveOffset, out _, out var detail))
         {
             return CapabilityValidationResult.Invalid(
                 ActionRejectionReason.InvalidParameters,
