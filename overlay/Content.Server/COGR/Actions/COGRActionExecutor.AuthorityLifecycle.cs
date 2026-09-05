@@ -42,14 +42,24 @@ public sealed partial class COGRActionExecutor
     }
 
     /// <summary>
-    /// Removes adapter-native tracking after another action lifecycle path terminates a proposal.
+    /// Removes only adapter-native locomotion tracking for one proposal.
+    /// Physical body orientation, attention, communication, and manipulation are separate control channels.
     /// </summary>
-    public void CleanupActionTracking(ActionProposalId proposalId, BodyId bodyId)
+    private void CleanupLocomotionTracking(ActionProposalId proposalId, BodyId bodyId)
     {
         _movementHandler.CleanupMovement(proposalId, bodyId, EntityManager);
         _relativeSpatialMovementHandler.CleanupMovement(proposalId, EntityManager);
         CleanupDirectionalSteering(proposalId);
         CleanupProjectedObjectiveSteering(proposalId);
+    }
+
+    /// <summary>
+    /// Removes all adapter-native tracking after another action lifecycle path terminates a proposal.
+    /// </summary>
+    public void CleanupActionTracking(ActionProposalId proposalId, BodyId bodyId)
+    {
+        CleanupLocomotionTracking(proposalId, bodyId);
+        _sustainedOrientationHandler.Cleanup(proposalId);
         CleanupAcquisition(proposalId);
     }
 }
