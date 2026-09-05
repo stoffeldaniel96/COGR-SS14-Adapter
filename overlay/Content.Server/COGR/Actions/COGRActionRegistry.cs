@@ -8,7 +8,7 @@ namespace Content.Server.COGR.Actions;
 
 /// <summary>
 /// SS14 implementation of active action registry for F02 action lifecycle.
-/// Tracks active actions, detects conflicts, and enforces timeouts.
+/// Tracks active actions, detects embodiment control conflicts, and enforces timeouts.
 /// </summary>
 public sealed class COGRActionRegistry : IActiveActionRegistry
 {
@@ -86,12 +86,14 @@ public sealed class COGRActionRegistry : IActiveActionRegistry
     {
         lock (_lock)
         {
-            var category = capability.GetCategory();
+            var requestedClaims = COGRActuatorControlChannelPolicy.GetClaims(capability);
+            if (requestedClaims == COGRPhysicalControlChannel.None)
+                return null;
 
             return _actions.Values
-                .Where(a => a.BodyId == bodyId &&
-                           !a.State.IsTerminal() &&
-                           a.Capability.GetCategory() == category)
+                .Where(a => a.BodyId == bodyId
+                            && !a.State.IsTerminal()
+                            && (COGRActuatorControlChannelPolicy.GetClaims(a.Capability) & requestedClaims) != 0)
                 .FirstOrDefault();
         }
     }
