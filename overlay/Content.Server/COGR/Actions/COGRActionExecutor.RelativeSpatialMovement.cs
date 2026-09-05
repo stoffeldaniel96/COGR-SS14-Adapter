@@ -1,6 +1,7 @@
 using COGR.Core.Actions;
 using COGR.Core.Actions.Parameters;
 using COGR.Core.Identifiers;
+using COGR.Core.Time;
 using Content.Server.COGR.Systems;
 
 namespace Content.Server.COGR.Actions;
@@ -65,9 +66,24 @@ public sealed partial class COGRActionExecutor
 
     private ActionExecutionResult ExecuteMovementStop(ActionAttempt attempt)
     {
-        var result = _movementHandler.ExecuteStop(attempt, EntityManager, _actionRegistry);
-        _relativeSpatialMovementHandler.CleanupAllForBody(attempt.BodyId, EntityManager);
-        return result;
+        // A stop request interrupts only adapter-owned locomotion realizations. Body orientation is an independent
+        // physical control channel and must survive unless it is explicitly cancelled or otherwise invalidated.
+        var activeLocomotion = _actionRegistry.GetActiveForBodyClaimingChannel(
+            attempt.BodyId,
+            COGRPhysicalControlChannel.Locomotion);
+        var tick = new SimTick((ulong)_timing.CurTick.Value);
+
+        foreach (var activeAttempt in activeLocomotion)
+        {
+            if (activeAttempt.ProposalId == attempt.ProposalId)
+                continue;
+
+            CleanupLocomotionTracking(activeAttempt.ProposalId, activeAttempt.BodyId);
+            _actionRegistry.UpdateState(activeAttempt.ProposalId, ActionState.Cancelled, tick);
+            _actionRegistry.Remove(activeAttempt.ProposalId);
+        }
+
+        return ActionExecutionResult.Completed(null);
     }
 
     private static CapabilityValidationResult ValidateEstablishSpatialRelationParams(ReadOnlyMemory<byte> parameters)
