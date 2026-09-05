@@ -28,19 +28,22 @@ if ($null -eq $wiring) {
 }
 
 $serverProjectPath = Join-Path $stationRoot $wiring.contentServerProject
+$testsProjectPath = Join-Path $stationRoot $wiring.contentTestsProject
 $centralPackagePath = Join-Path $stationRoot $wiring.centralPackageFile
 
-foreach ($requiredPath in @($serverProjectPath, $centralPackagePath)) {
+foreach ($requiredPath in @($serverProjectPath, $testsProjectPath, $centralPackagePath)) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
         throw "Required Station integration file is missing: $requiredPath"
     }
 }
 
 [xml] $serverProject = Get-Content -Raw -LiteralPath $serverProjectPath
+[xml] $testsProject = Get-Content -Raw -LiteralPath $testsProjectPath
 [xml] $centralPackages = Get-Content -Raw -LiteralPath $centralPackagePath
 
 $failures = New-Object System.Collections.Generic.List[string]
 $serverChanged = $false
+$testsChanged = $false
 $packagesChanged = $false
 
 function Get-SingleNode {
@@ -84,6 +87,47 @@ function Save-XmlDocument {
     }
 }
 
+function Ensure-AssemblyReferences {
+    param(
+        [Parameter(Mandatory = $true)][System.Xml.XmlDocument] $Project,
+        [Parameter(Mandatory = $true)][System.Xml.XmlElement] $ItemGroup,
+        [Parameter(Mandatory = $true)] $References,
+        [Parameter(Mandatory = $true)][string] $ProjectLabel,
+        [Parameter(Mandatory = $true)][ref] $Changed
+    )
+
+    foreach ($reference in $References) {
+        $id = [string] $reference.id
+        $hintPath = [string] $reference.hintPath
+        $xpath = "/Project/ItemGroup/Reference[@Include='$id']"
+        $existing = Get-SingleNode -Document $Project -XPath $xpath -Description "Reference '$id' in $ProjectLabel"
+
+        if ($null -ne $existing) {
+            $existingHint = $existing.SelectSingleNode('HintPath')
+            if ($null -eq $existingHint) {
+                $failures.Add("$ProjectLabel Reference '$id' exists without a HintPath; expected '$hintPath'.")
+            }
+            elseif (([string] $existingHint.InnerText) -ne $hintPath) {
+                $failures.Add("$ProjectLabel Reference '$id' uses '$($existingHint.InnerText)' but adapter declares '$hintPath'.")
+            }
+            continue
+        }
+
+        if ($VerifyOnly) {
+            $failures.Add("Missing $ProjectLabel assembly Reference '$id' -> '$hintPath'.")
+            continue
+        }
+
+        $node = $Project.CreateElement('Reference')
+        $node.SetAttribute('Include', $id)
+        $hintNode = $Project.CreateElement('HintPath')
+        $hintNode.InnerText = $hintPath
+        [void] $node.AppendChild($hintNode)
+        [void] $ItemGroup.AppendChild($node)
+        $Changed.Value = $true
+    }
+}
+
 $centralItemGroup = $centralPackages.SelectSingleNode('/Project/ItemGroup')
 if ($null -eq $centralItemGroup) {
     throw "Could not locate an ItemGroup in $($wiring.centralPackageFile)."
@@ -115,8 +159,8 @@ foreach ($package in $wiring.packageReferences) {
     $packagesChanged = $true
 }
 
-$packageItemGroup = $serverProject.SelectSingleNode('/Project/ItemGroup[PackageReference]')
-if ($null -eq $packageItemGroup) {
+$serverItemGroup = $serverProject.SelectSingleNode('/Project/ItemGroup[PackageReference]')
+if ($null -eq $serverItemGroup) {
     throw "Could not locate the Content.Server PackageReference ItemGroup."
 }
 
@@ -136,40 +180,28 @@ foreach ($package in $wiring.packageReferences) {
 
     $node = $serverProject.CreateElement('PackageReference')
     $node.SetAttribute('Include', $id)
-    [void] $packageItemGroup.AppendChild($node)
+    [void] $serverItemGroup.AppendChild($node)
     $serverChanged = $true
 }
 
-foreach ($reference in $wiring.assemblyReferences) {
-    $id = [string] $reference.id
-    $hintPath = [string] $reference.hintPath
-    $xpath = "/Project/ItemGroup/Reference[@Include='$id']"
-    $existing = Get-SingleNode -Document $serverProject -XPath $xpath -Description "Reference '$id'"
+Ensure-AssemblyReferences `
+    -Project $serverProject `
+    -ItemGroup $serverItemGroup `
+    -References $wiring.assemblyReferences `
+    -ProjectLabel "Content.Server" `
+    -Changed ([ref] $serverChanged)
 
-    if ($null -ne $existing) {
-        $existingHint = $existing.SelectSingleNode('HintPath')
-        if ($null -eq $existingHint) {
-            $failures.Add("Content.Server Reference '$id' exists without a HintPath; expected '$hintPath'.")
-        }
-        elseif (([string] $existingHint.InnerText) -ne $hintPath) {
-            $failures.Add("Content.Server Reference '$id' uses '$($existingHint.InnerText)' but adapter declares '$hintPath'.")
-        }
-        continue
-    }
-
-    if ($VerifyOnly) {
-        $failures.Add("Missing Content.Server assembly Reference '$id' -> '$hintPath'.")
-        continue
-    }
-
-    $node = $serverProject.CreateElement('Reference')
-    $node.SetAttribute('Include', $id)
-    $hintNode = $serverProject.CreateElement('HintPath')
-    $hintNode.InnerText = $hintPath
-    [void] $node.AppendChild($hintNode)
-    [void] $packageItemGroup.AppendChild($node)
-    $serverChanged = $true
+$testsItemGroup = $testsProject.SelectSingleNode('/Project/ItemGroup[ProjectReference]')
+if ($null -eq $testsItemGroup) {
+    throw "Could not locate the Content.Tests ProjectReference ItemGroup."
 }
+
+Ensure-AssemblyReferences `
+    -Project $testsProject `
+    -ItemGroup $testsItemGroup `
+    -References $wiring.testAssemblyReferences `
+    -ProjectLabel "Content.Tests" `
+    -Changed ([ref] $testsChanged)
 
 if ($failures.Count -gt 0) {
     $detail = ($failures | Sort-Object -Unique) -join [Environment]::NewLine
@@ -191,7 +223,12 @@ if ($serverChanged) {
     Write-Host "Updated $($wiring.contentServerProject)."
 }
 
-if (-not $packagesChanged -and -not $serverChanged) {
+if ($testsChanged) {
+    Save-XmlDocument -Document $testsProject -Path $testsProjectPath
+    Write-Host "Updated $($wiring.contentTestsProject)."
+}
+
+if (-not $packagesChanged -and -not $serverChanged -and -not $testsChanged) {
     Write-Host "Adapter install wiring was already present and compatible."
 }
 
