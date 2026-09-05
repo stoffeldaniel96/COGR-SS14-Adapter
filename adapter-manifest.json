@@ -53,6 +53,7 @@
   "integrationWiring": {
     "ownership": "adapter-install-wiring",
     "contentServerProject": "Content.Server/Content.Server.csproj",
+    "contentTestsProject": "Content.Tests/Content.Tests.csproj",
     "centralPackageFile": "Directory.Packages.props",
     "packageReferences": [
       { "id": "Grpc.Net.Client", "version": "2.67.0" },
@@ -65,7 +66,10 @@
       { "id": "COGR.Transport.Grpc", "hintPath": "..\\lib\\COGR.Transport.Grpc.dll" },
       { "id": "COGR.SS14Bridge", "hintPath": "..\\lib\\COGR.SS14Bridge.dll" }
     ],
-    "policy": "Installer adds missing declared references, accepts exact declared central package versions, and fails on conflicting existing versions or reference paths."
+    "testAssemblyReferences": [
+      { "id": "COGR.Core", "hintPath": "..\\lib\\COGR.Core.dll" }
+    ],
+    "policy": "Installer adds missing declared references to their owning Station projects, accepts exact declared central package versions, and fails on conflicting existing versions or reference paths. Adapter-owned tests may directly compile only against explicitly declared test assembly references."
   },
   "upstreamPatchCandidates": [
     "Content.Shared/Speech/ListenEvent.cs",
