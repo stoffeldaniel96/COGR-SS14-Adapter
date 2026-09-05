@@ -108,6 +108,45 @@ public sealed class COGRActuatorControlChannelPolicyTests
         Assert.That(conflict?.ProposalId, Is.EqualTo(active.ProposalId));
     }
 
+    [Test]
+    public void Registry_LocomotionSnapshotExcludesIndependentBodyOrientation()
+    {
+        var registry = new COGRActionRegistry();
+        var body = BodyId.NewId();
+        var locomotion = CreateAttempt(body, ActionCapability.MovementSteerToBodyRelativePoint);
+        var orientation = CreateAttempt(body, ActionCapability.MovementMaintainOrientationToReference);
+
+        registry.Register(locomotion);
+        registry.Register(orientation);
+        registry.UpdateState(locomotion.ProposalId, ActionState.Progressing, new SimTick(10));
+        registry.UpdateState(orientation.ProposalId, ActionState.Progressing, new SimTick(10));
+
+        var locomotorActions = registry.GetActiveForBodyClaimingChannel(
+            body,
+            COGRPhysicalControlChannel.Locomotion);
+
+        Assert.That(locomotorActions, Has.Count.EqualTo(1));
+        Assert.That(locomotorActions[0].ProposalId, Is.EqualTo(locomotion.ProposalId));
+    }
+
+    [Test]
+    public void Registry_LocomotionSnapshotIncludesCompositeSpatialRelation()
+    {
+        var registry = new COGRActionRegistry();
+        var body = BodyId.NewId();
+        var relation = CreateAttempt(body, ActionCapability.MovementEstablishSpatialRelation);
+
+        registry.Register(relation);
+        registry.UpdateState(relation.ProposalId, ActionState.Started, new SimTick(10));
+
+        var locomotorActions = registry.GetActiveForBodyClaimingChannel(
+            body,
+            COGRPhysicalControlChannel.Locomotion);
+
+        Assert.That(locomotorActions, Has.Count.EqualTo(1));
+        Assert.That(locomotorActions[0].ProposalId, Is.EqualTo(relation.ProposalId));
+    }
+
     private static ActionAttempt CreateAttempt(BodyId body, ActionCapability capability)
     {
         var agent = AgentId.NewId();
