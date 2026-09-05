@@ -51,6 +51,27 @@ public sealed class COGRActionRegistry : IActiveActionRegistry
         }
     }
 
+    /// <summary>
+    /// Gets a stable snapshot of the still-active actions for one body that claim the requested
+    /// Station physical-control channel. This is adapter/embodiment policy, not Runtime action categorization.
+    /// </summary>
+    public IReadOnlyList<ActionAttempt> GetActiveForBodyClaimingChannel(
+        BodyId bodyId,
+        COGRPhysicalControlChannel channel)
+    {
+        lock (_lock)
+        {
+            if (channel == COGRPhysicalControlChannel.None)
+                return Array.Empty<ActionAttempt>();
+
+            return _actions.Values
+                .Where(a => a.BodyId == bodyId
+                            && !a.State.IsTerminal()
+                            && COGRActuatorControlChannelPolicy.Claims(a, channel))
+                .ToList();
+        }
+    }
+
     public IEnumerable<ActionAttempt> GetTimedOut(SimTick currentTick, uint defaultTimeoutMs, double msPerTick)
     {
         lock (_lock)
