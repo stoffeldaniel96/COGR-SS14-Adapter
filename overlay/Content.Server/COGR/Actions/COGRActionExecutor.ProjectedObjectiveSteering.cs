@@ -21,8 +21,6 @@ public sealed partial class COGRActionExecutor
 {
     private const ulong ProjectedObjectiveProgressCheckTicks = 30;
     private const int ProjectedObjectiveMaximumStallChecks = 6;
-    private const float ProjectedObjectiveMaximumArrivalTolerance = 0.10f;
-    private const float ProjectedObjectiveArrivalToleranceFraction = 0.20f;
     private const float ProjectedObjectiveMaximumMinimumProgress = 0.01f;
     private const float ProjectedObjectiveMinimumProgressFraction = 0.05f;
 
@@ -89,9 +87,6 @@ public sealed partial class COGRActionExecutor
         }
 
         var directDistance = parentOffset.Length();
-        var arrivalTolerance = MathF.Min(
-            ProjectedObjectiveMaximumArrivalTolerance,
-            directDistance * ProjectedObjectiveArrivalToleranceFraction);
         var minimumProgress = MathF.Min(
             ProjectedObjectiveMaximumMinimumProgress,
             directDistance * ProjectedObjectiveMinimumProgressFraction);
@@ -107,6 +102,15 @@ public sealed partial class COGRActionExecutor
         var targetCoordinates = new EntityCoordinates(xform.ParentUid, targetPosition);
         _npcSteering.Unregister(entity.Value);
         var steering = _npcSteering.Register(entity.Value, targetCoordinates);
+        if (!TryResolveProjectedObjectiveArrivalTolerance(steering.Range, out var arrivalTolerance))
+        {
+            _npcSteering.Unregister(entity.Value);
+            RemComp<ActiveNPCComponent>(entity.Value);
+            return ActionExecutionResult.Failed(
+                ActionFailureReason.Unspecified,
+                "Native steering exposes no finite positive arrival range for projected objective completion");
+        }
+
         steering.Status = SteeringStatus.Moving;
 
         var startTick = (ulong)_timing.CurTick.Value;
@@ -129,7 +133,7 @@ public sealed partial class COGRActionExecutor
         if (COGRAdapterTrace.Enabled)
         {
             _sawmill.Debug(
-                "COGR projected objective: proposal={0} agent={1} bodyOffset=({2:F3},{3:F3},{4:F3}) nativeOffset=({5:F3},{6:F3}) directDistance={7:F3} runRequested={8}",
+                "COGR projected objective: proposal={0} agent={1} bodyOffset=({2:F3},{3:F3},{4:F3}) nativeOffset=({5:F3},{6:F3}) directDistance={7:F3} arrivalRange={8:F3} runRequested={9}",
                 attempt.ProposalId,
                 attempt.AgentId,
                 parameters.ObjectiveOffset.Forward,
@@ -138,6 +142,7 @@ public sealed partial class COGRActionExecutor
                 parentOffset.X,
                 parentOffset.Y,
                 directDistance,
+                arrivalTolerance,
                 parameters.Run);
         }
 
@@ -228,7 +233,7 @@ public sealed partial class COGRActionExecutor
             return ActionResult.Completed(
                 active.ProposalId,
                 tick,
-                detail: "Fixed projected body-relative objective reached; cognition should reassess current evidence");
+                detail: "Fixed projected body-relative objective reached within native steering arrival range; cognition should reassess current evidence");
         }
 
         var sampledTravel = (currentPosition - active.LastSampledPosition).Length();
@@ -388,6 +393,14 @@ public sealed partial class COGRActionExecutor
         }
 
         return true;
+    }
+
+    private static bool TryResolveProjectedObjectiveArrivalTolerance(
+        float nativeSteeringRange,
+        out float arrivalTolerance)
+    {
+        arrivalTolerance = nativeSteeringRange;
+        return float.IsFinite(nativeSteeringRange) && nativeSteeringRange > 0f;
     }
 
     private static Vector2 OwnerRelativeObjectiveToParentOffset(Vector2 ownerRelativeOffset, Angle localRotation)
