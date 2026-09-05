@@ -158,6 +158,7 @@ public sealed partial class COGRActionExecutor : EntitySystem
             ActionCapability.MovementTurn => _movementHandler.ExecuteTurn(attempt, EntityManager),
             ActionCapability.MovementStep => _movementHandler.ExecuteStep(attempt, EntityManager),
             ActionCapability.MovementSteerRelative => StartDirectionalSteering(attempt),
+            ActionCapability.MovementSteerToBodyRelativePoint => StartProjectedObjectiveSteering(attempt),
             ActionCapability.MovementStop => ExecuteMovementStop(attempt),
             ActionCapability.MovementMoveToLocation => _movementHandler.StartMoveToLocation(attempt, EntityManager),
             ActionCapability.MovementEstablishSpatialRelation => ExecuteEstablishSpatialRelation(attempt),
@@ -221,6 +222,7 @@ public sealed partial class COGRActionExecutor : EntitySystem
             _movementHandler.CleanupMovement(attempt.ProposalId, attempt.BodyId, EntityManager);
             _relativeSpatialMovementHandler.CleanupMovement(attempt.ProposalId, EntityManager);
             CleanupDirectionalSteering(attempt.ProposalId);
+            CleanupProjectedObjectiveSteering(attempt.ProposalId);
             _sustainedOrientationHandler.Cleanup(attempt.ProposalId);
             CleanupAcquisition(attempt.ProposalId);
             
@@ -236,6 +238,8 @@ public sealed partial class COGRActionExecutor : EntitySystem
         results.AddRange(relativeSpatialResults);
         var directionalSteeringResults = TickDirectionalSteering(currentTick);
         results.AddRange(directionalSteeringResults);
+        var projectedObjectiveSteeringResults = TickProjectedObjectiveSteering(currentTick);
+        results.AddRange(projectedObjectiveSteeringResults);
         var orientationResults = TickSustainedOrientations(currentTick);
         results.AddRange(orientationResults);
         var acquisitionResults = TickAcquisitions(currentTick);
@@ -369,6 +373,7 @@ public sealed partial class COGRActionExecutor : EntitySystem
             ActionCapability.MovementTurn => ValidateTurnParams(attempt.Parameters),
             ActionCapability.MovementStep => ValidateStepParams(attempt.Parameters),
             ActionCapability.MovementSteerRelative => ValidateSteerRelativeParams(attempt.Parameters),
+            ActionCapability.MovementSteerToBodyRelativePoint => ValidateProjectedObjectiveSteeringParams(attempt.Parameters),
             ActionCapability.MovementStop => CapabilityValidationResult.Valid(),
             ActionCapability.MovementMoveToLocation => ValidateMoveToParams(attempt.Parameters),
             ActionCapability.MovementEstablishSpatialRelation => ValidateEstablishSpatialRelationParams(attempt.Parameters),
