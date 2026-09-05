@@ -36,10 +36,15 @@ public static class COGRActuatorControlChannelPolicy
         ActionCapability.MovementStep
             or ActionCapability.MovementStop
             or ActionCapability.MovementMoveToLocation
-            or ActionCapability.MovementEstablishSpatialRelation
             or ActionCapability.MovementSteerRelative
             or ActionCapability.MovementSteerToBodyRelativePoint
             => COGRPhysicalControlChannel.Locomotion,
+
+        // This legacy/composite primitive can both locomote and apply terminal body orientation.
+        // Until its parameter-sensitive terminal preference is split into a separate orientation commitment,
+        // conservatively reserve both physical coordinates rather than allowing an orientation race at completion.
+        ActionCapability.MovementEstablishSpatialRelation
+            => COGRPhysicalControlChannel.Locomotion | COGRPhysicalControlChannel.BodyOrientation,
 
         ActionCapability.MovementTurn
             or ActionCapability.MovementMaintainOrientationToReference
