@@ -3,6 +3,7 @@ using System.Numerics;
 using System.Reflection;
 using COGR.Core.Actions.Parameters;
 using Content.Server.COGR.Actions;
+using Content.Server.NPC.Components;
 using NUnit.Framework;
 using Robust.Shared.Maths;
 
@@ -44,6 +45,42 @@ public sealed class COGRProjectedObjectiveSteeringTests
 
         Assert.That(projected.X, Is.EqualTo(0f).Within(0.00001f));
         Assert.That(projected.Y, Is.EqualTo(0.70f).Within(0.00001f));
+    }
+
+    [Test]
+    public void ProjectedObjectiveArrivalTolerance_UsesNativeSteeringRange()
+    {
+        var resolve = RequireStaticMethod("TryResolveProjectedObjectiveArrivalTolerance");
+        var nativeRange = new NPCSteeringComponent().Range;
+        object?[] args =
+        [
+            nativeRange,
+            0f,
+        ];
+
+        var accepted = (bool)resolve.Invoke(null, args)!;
+
+        Assert.That(accepted, Is.True);
+        Assert.That((float)args[1]!, Is.EqualTo(nativeRange));
+        Assert.That(nativeRange, Is.EqualTo(0.20f));
+    }
+
+    [TestCase(0f)]
+    [TestCase(-0.1f)]
+    [TestCase(float.NaN)]
+    [TestCase(float.PositiveInfinity)]
+    public void ProjectedObjectiveArrivalTolerance_RejectsInvalidNativeRange(float nativeRange)
+    {
+        var resolve = RequireStaticMethod("TryResolveProjectedObjectiveArrivalTolerance");
+        object?[] args =
+        [
+            nativeRange,
+            0f,
+        ];
+
+        var accepted = (bool)resolve.Invoke(null, args)!;
+
+        Assert.That(accepted, Is.False);
     }
 
     [Test]
