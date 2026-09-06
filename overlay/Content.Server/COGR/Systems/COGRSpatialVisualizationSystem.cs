@@ -281,7 +281,12 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
 
     private COGRSpatialVisualizationMessage ResolvePayload(SpatialPollPayload payload)
     {
-        var empty = new COGRSpatialVisualizationMessage { AgentId = payload.AgentId };
+        var empty = new COGRSpatialVisualizationMessage
+        {
+            AgentId = payload.AgentId,
+            TrackedTargetCount = payload.TrackedTargetCount,
+            UnprojectableTrackedTargetCount = payload.UnprojectableTrackedTargetCount,
+        };
         if (_subscribedConnection is not { IsConnected: true } connection
             || connection.ConnectionId == Guid.Empty)
         {
@@ -292,7 +297,8 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         var targets = new List<COGRSpatialVisualizationTarget>();
         foreach (var target in payload.Targets)
         {
-            if (!string.Equals(target.AgentId, payload.AgentId, StringComparison.OrdinalIgnoreCase)
+            if (!target.IsTracked
+                || !string.Equals(target.AgentId, payload.AgentId, StringComparison.OrdinalIgnoreCase)
                 || !TryResolveBodyFrame(
                     connectionId,
                     target.AgentId,
@@ -315,7 +321,8 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                 AgentId = target.AgentId,
                 TargetId = target.TargetId,
                 TargetRevision = target.TargetRevision,
-                IsTracked = target.IsTracked,
+                IsTracked = true,
+                IsFocal = target.IsFocal,
                 Belief = beliefCoordinates,
             });
         }
@@ -365,6 +372,8 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         return new COGRSpatialVisualizationMessage
         {
             AgentId = payload.AgentId,
+            TrackedTargetCount = payload.TrackedTargetCount,
+            UnprojectableTrackedTargetCount = payload.UnprojectableTrackedTargetCount,
             Targets = targets.ToArray(),
             Paths = paths.ToArray(),
         };
@@ -452,6 +461,8 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         public string AgentId { get; init; } = string.Empty;
         public ulong LatestPathSequence { get; init; }
         public ulong LatestNavigationTraceSequence { get; init; }
+        public int TrackedTargetCount { get; init; }
+        public int UnprojectableTrackedTargetCount { get; init; }
         public SpatialTargetPayload[] Targets { get; init; } = [];
         public SpatialPathPayload[] Paths { get; init; } = [];
         public NavigationTracePayload[] NavigationTrace { get; init; } = [];
@@ -463,6 +474,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         public string TargetId { get; init; } = string.Empty;
         public ulong TargetRevision { get; init; }
         public bool IsTracked { get; init; }
+        public bool IsFocal { get; init; }
         public double LocalX { get; init; }
         public double LocalY { get; init; }
         public double LocalZ { get; init; }
