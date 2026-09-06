@@ -18,9 +18,10 @@ public sealed partial class ShowCOGRSpatialVisualizationCommand : LocalizedEntit
             {
                 shell.WriteLine($"Currently tracking {current}.");
                 shell.WriteLine(
-                    $"Rich tracked targets: {_visualization.TrackedTargetCount}; "
-                    + $"world-space markers: {_visualization.ProjectedTrackedTargetCount}; "
-                    + $"unprojectable in current owner frame: {_visualization.UnprojectableTrackedTargetCount}.");
+                    $"Resident belief targets: {_visualization.ResidentTargetCount}; "
+                    + $"world-space markers: {_visualization.ProjectedResidentTargetCount}; "
+                    + $"unprojectable in current owner frame: {_visualization.UnprojectableResidentTargetCount}; "
+                    + $"rich active maintenance: {_visualization.RichlyMaintainedTargetCount}.");
             }
             return;
         }
@@ -41,7 +42,8 @@ public sealed partial class ShowCOGRSpatialVisualizationCommand : LocalizedEntit
         var agentId = agentGuid.ToString("D");
         _visualization.TrackAgent(agentId);
         shell.WriteLine($"COGR spatial visualization tracking {agentId}.");
-        shell.WriteLine("Tracked rich belief targets render blue; the explicit perceptual-attention focus renders red.");
-        shell.WriteLine("Run 'showcogrspatial' with no argument to inspect projected versus unprojectable tracked-target counts.");
+        shell.WriteLine("Resident spatial belief targets render blue; the explicit perceptual-attention focus renders red.");
+        shell.WriteLine("Markers retire only when a successful Runtime full frame no longer reports that resident target.");
+        shell.WriteLine("Run 'showcogrspatial' with no argument to inspect resident, projected, unprojectable, and rich-maintenance counts.");
     }
 }
