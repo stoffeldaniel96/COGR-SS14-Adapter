@@ -3,6 +3,8 @@ using System.Numerics;
 using System.Text;
 using System.Text.Json;
 using COGR.Core.Identifiers;
+using COGR.Core.Perception;
+using COGR.Core.Time;
 using Content.Server.Administration.Managers;
 using Content.Shared.Administration;
 using Content.Shared.COGR.SpatialVisualization;
@@ -31,10 +33,12 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
     private readonly Dictionary<ICommonSession, string> _subscriberAgents = [];
     private readonly Dictionary<string, ulong> _latestPathSequenceByAgent = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ulong> _latestNavigationTraceSequenceByAgent = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ulong> _latestFocusTraceSequenceByAgent = new(StringComparer.OrdinalIgnoreCase);
 
     private COGRAdapterSystem _adapter = default!;
     private COGRBodyAuthorityCoordinatorSystem _authority = default!;
     private ISawmill _traceSawmill = default!;
+    private ISawmill _focusSawmill = default!;
     private COGRConnectionManager? _subscribedConnection;
     private Guid? _pendingPollCorrelation;
     private string? _pendingPollAgentId;
@@ -47,6 +51,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         _adapter = EntityManager.System<COGRAdapterSystem>();
         _authority = EntityManager.System<COGRBodyAuthorityCoordinatorSystem>();
         _traceSawmill = _logManager.GetSawmill("cogr.navtrace");
+        _focusSawmill = _logManager.GetSawmill("cogr.focus");
         SubscribeNetworkEvent<RequestCOGRSpatialVisualizationMessage>(OnSubscriptionRequest);
     }
 
@@ -109,6 +114,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         {
             _subscriberAgents.TryGetValue(session, out var previousAgentId);
             _subscriberAgents[session] = agentId;
+            COGRSpatialCalibrationDiagnosticCache.SetEnabled(AgentId.FromGuid(agentGuid), true);
             _lastPollTick = 0;
             if (previousAgentId is not null
                 && !string.Equals(previousAgentId, agentId, StringComparison.OrdinalIgnoreCase))
@@ -141,6 +147,9 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         SendPoll(agentId, enabled: false, trackResponse: false);
         _latestPathSequenceByAgent.Remove(agentId);
         _latestNavigationTraceSequenceByAgent.Remove(agentId);
+        _latestFocusTraceSequenceByAgent.Remove(agentId);
+        if (Guid.TryParse(agentId, out var agentGuid) && agentGuid != Guid.Empty)
+            COGRSpatialCalibrationDiagnosticCache.SetEnabled(AgentId.FromGuid(agentGuid), false);
         if (string.Equals(_pendingPollAgentId, agentId, StringComparison.OrdinalIgnoreCase))
         {
             _pendingPollCorrelation = null;
@@ -167,6 +176,9 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
 
     private void SendPoll(string agentId, bool enabled, bool trackResponse)
     {
+        if (Guid.TryParse(agentId, out var diagnosticAgentGuid) && diagnosticAgentGuid != Guid.Empty)
+            COGRSpatialCalibrationDiagnosticCache.SetEnabled(AgentId.FromGuid(diagnosticAgentGuid), enabled);
+
         var connection = _subscribedConnection;
         if (connection is not { IsConnected: true })
             return;
@@ -178,6 +190,9 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
             afterPathSequence = enabled ? _latestPathSequenceByAgent.GetValueOrDefault(agentId) : 0UL,
             afterNavigationTraceSequence = enabled
                 ? _latestNavigationTraceSequenceByAgent.GetValueOrDefault(agentId)
+                : 0UL,
+            afterFocusTraceSequence = enabled
+                ? _latestFocusTraceSequenceByAgent.GetValueOrDefault(agentId)
                 : 0UL,
         });
 
@@ -251,6 +266,9 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         _latestNavigationTraceSequenceByAgent[requestedAgentId] = Math.Max(
             _latestNavigationTraceSequenceByAgent.GetValueOrDefault(requestedAgentId),
             payload.LatestNavigationTraceSequence);
+        _latestFocusTraceSequenceByAgent[requestedAgentId] = Math.Max(
+            _latestFocusTraceSequenceByAgent.GetValueOrDefault(requestedAgentId),
+            payload.LatestFocusTraceSequence);
 
         foreach (var trace in payload.NavigationTrace.OrderBy(static entry => entry.Sequence))
         {
@@ -259,6 +277,21 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
 
             var suffix = string.IsNullOrWhiteSpace(trace.Detail) ? string.Empty : $" ({trace.Detail})";
             _traceSawmill.Info("{0} -> {1}{2}", trace.Stage, trace.Outcome, suffix);
+        }
+
+        foreach (var trace in payload.FocusTrace.OrderBy(static entry => entry.Sequence))
+        {
+            if (!string.Equals(trace.AgentId, requestedAgentId, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            _focusSawmill.Info(
+                "focus r{0} cseq={1}:{2} {3} -> {4} ({5})",
+                trace.AttentionRevision,
+                trace.CognitiveSequence,
+                trace.OperationOrdinal,
+                string.IsNullOrWhiteSpace(trace.PreviousTargetId) ? "<none>" : trace.PreviousTargetId,
+                string.IsNullOrWhiteSpace(trace.CurrentTargetId) ? "<none>" : trace.CurrentTargetId,
+                trace.Reason);
         }
 
         var message = ResolvePayload(payload);
@@ -302,7 +335,9 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                 || !TryResolveBodyFrame(
                     connectionId,
                     target.AgentId,
-                    out _,
+                    out var agentId,
+                    out var bodyId,
+                    out var bodyGeneration,
                     out var bodyCoordinates,
                     out var worldRotation)
                 || !TryRealizeLocalPoint(
@@ -316,6 +351,49 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                 continue;
             }
 
+            var beliefVectorMagnitudeLocalUnits = Math.Sqrt(
+                (target.LocalX * target.LocalX)
+                + (target.LocalY * target.LocalY)
+                + (target.LocalZ * target.LocalZ));
+            double? perceivedLocalRange = null;
+            double? actualDistanceTiles = null;
+            double? actualDistanceCalibratedLocalUnits = null;
+
+            if (Guid.TryParse(target.ActualEnvironmentReference, out var environmentGuid)
+                && environmentGuid != Guid.Empty)
+            {
+                var environmentReference = EnvironmentRef.FromGuid(environmentGuid);
+                if (COGRSpatialCalibrationDiagnosticCache.TryGet(agentId, environmentReference, out var perceivedSample)
+                    && perceivedSample is not null)
+                {
+                    perceivedLocalRange = perceivedSample.LocalDistance;
+                }
+
+                var registry = _adapter.ReferenceRegistry;
+                var actualEntity = registry?.TryResolve(
+                    environmentReference,
+                    new EnvironmentReferenceResolutionContext
+                    {
+                        ConnectionId = connectionId,
+                        CurrentTick = new SimTick((ulong)_timing.CurTick.Value),
+                        BodyId = bodyId,
+                        BodyGeneration = bodyGeneration,
+                    });
+                if (actualEntity.HasValue
+                    && TryComp(actualEntity.Value, out TransformComponent? actualTransform))
+                {
+                    var actualCoordinates = _transform.GetMapCoordinates(actualEntity.Value, xform: actualTransform);
+                    if (actualCoordinates.MapId != MapId.Nullspace
+                        && actualCoordinates.MapId == bodyCoordinates.MapId)
+                    {
+                        actualDistanceTiles = Vector2.Distance(bodyCoordinates.Position, actualCoordinates.Position);
+                        actualDistanceCalibratedLocalUnits = COGREmbodimentSpatialCalibration.NativeUnitsToLocalUnits(
+                            COGREmbodimentSpatialCalibration.GenericHumanoidProfile,
+                            actualDistanceTiles.Value);
+                    }
+                }
+            }
+
             targets.Add(new COGRSpatialVisualizationTarget
             {
                 AgentId = target.AgentId,
@@ -324,6 +402,10 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                 IsRichlyMaintained = target.IsRichlyMaintained,
                 IsFocal = target.IsFocal,
                 Belief = beliefCoordinates,
+                PerceivedLocalRange = perceivedLocalRange,
+                BeliefVectorMagnitudeLocalUnits = beliefVectorMagnitudeLocalUnits,
+                ActualDistanceTiles = actualDistanceTiles,
+                ActualDistanceCalibratedLocalUnits = actualDistanceCalibratedLocalUnits,
             });
         }
 
@@ -334,6 +416,8 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                 || !TryResolveBodyFrame(
                     connectionId,
                     path.AgentId,
+                    out _,
+                    out _,
                     out _,
                     out var bodyCoordinates,
                     out var worldRotation))
@@ -384,10 +468,14 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         ConnectionId connectionId,
         string rawAgentId,
         out AgentId agentId,
+        out BodyId bodyId,
+        out uint bodyGeneration,
         out MapCoordinates bodyCoordinates,
         out Angle worldRotation)
     {
         agentId = default;
+        bodyId = default;
+        bodyGeneration = 0;
         bodyCoordinates = default;
         worldRotation = default;
 
@@ -398,12 +486,14 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         var lease = _authority.ResolveBoundLease(agentId, connectionId);
         if (!lease.HasValue)
             return false;
+        bodyId = lease.Value.BodyId;
+        bodyGeneration = lease.Value.Generation;
 
         var resolvedBody = _authority.ResolveBoundBody(
             agentId,
-            lease.Value.BodyId,
+            bodyId,
             connectionId,
-            lease.Value.Generation);
+            bodyGeneration);
         if (!resolvedBody.HasValue || !TryComp(resolvedBody.Value, out TransformComponent? xform))
             return false;
 
@@ -448,6 +538,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
     {
         _latestPathSequenceByAgent.Clear();
         _latestNavigationTraceSequenceByAgent.Clear();
+        _latestFocusTraceSequenceByAgent.Clear();
         _pollCursor = 0;
     }
 
@@ -462,12 +553,14 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         public string AgentId { get; init; } = string.Empty;
         public ulong LatestPathSequence { get; init; }
         public ulong LatestNavigationTraceSequence { get; init; }
+        public ulong LatestFocusTraceSequence { get; init; }
         public int ResidentTargetCount { get; init; }
         public int RichlyMaintainedTargetCount { get; init; }
         public int UnprojectableResidentTargetCount { get; init; }
         public SpatialTargetPayload[] Targets { get; init; } = [];
         public SpatialPathPayload[] Paths { get; init; } = [];
         public NavigationTracePayload[] NavigationTrace { get; init; } = [];
+        public FocusTracePayload[] FocusTrace { get; init; } = [];
     }
 
     private sealed class SpatialTargetPayload
@@ -480,6 +573,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         public double LocalX { get; init; }
         public double LocalY { get; init; }
         public double LocalZ { get; init; }
+        public string? ActualEnvironmentReference { get; init; }
     }
 
     private sealed class SpatialPathPayload
@@ -503,5 +597,17 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         public string Stage { get; init; } = string.Empty;
         public string Outcome { get; init; } = string.Empty;
         public string? Detail { get; init; }
+    }
+
+    private sealed class FocusTracePayload
+    {
+        public ulong Sequence { get; init; }
+        public string AgentId { get; init; } = string.Empty;
+        public ulong AttentionRevision { get; init; }
+        public ulong CognitiveSequence { get; init; }
+        public uint OperationOrdinal { get; init; }
+        public string? PreviousTargetId { get; init; }
+        public string? CurrentTargetId { get; init; }
+        public string Reason { get; init; } = string.Empty;
     }
 }
