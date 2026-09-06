@@ -15,7 +15,13 @@ public sealed partial class ShowCOGRSpatialVisualizationCommand : LocalizedEntit
         {
             shell.WriteLine("Usage: showcogrspatial <agent-id|off>");
             if (_visualization.TrackedAgentId is { } current)
+            {
                 shell.WriteLine($"Currently tracking {current}.");
+                shell.WriteLine(
+                    $"Rich tracked targets: {_visualization.TrackedTargetCount}; "
+                    + $"world-space markers: {_visualization.ProjectedTrackedTargetCount}; "
+                    + $"unprojectable in current owner frame: {_visualization.UnprojectableTrackedTargetCount}.");
+            }
             return;
         }
 
@@ -35,5 +41,7 @@ public sealed partial class ShowCOGRSpatialVisualizationCommand : LocalizedEntit
         var agentId = agentGuid.ToString("D");
         _visualization.TrackAgent(agentId);
         shell.WriteLine($"COGR spatial visualization tracking {agentId}.");
+        shell.WriteLine("Tracked rich belief targets render blue; the explicit perceptual-attention focus renders red.");
+        shell.WriteLine("Run 'showcogrspatial' with no argument to inspect projected versus unprojectable tracked-target counts.");
     }
 }
