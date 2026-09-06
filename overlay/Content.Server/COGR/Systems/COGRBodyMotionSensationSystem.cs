@@ -17,15 +17,15 @@ using Robust.Shared.Timing;
 namespace Content.Server.COGR.Systems;
 
 /// <summary>
-/// Transduces authoritative SS14 body motion into sparse, qualitative vestibular/kinesthetic
+/// Transduces authoritative SS14 body motion into bounded, fallible vestibular/kinesthetic
 /// evidence for COGR-controlled bodies.
 /// </summary>
 /// <remarks>
 /// <para>
 /// SS14 coordinates, exact displacement, exact elapsed time, movement speed, event counts, maps,
 /// grids, routes, and action identity remain adapter-private. A continuous movement interval is
-/// reduced to one departure-body-relative bearing, one saturated sensed-duration band, and coarse
-/// reorientation before it enters cognition.
+/// reduced to one departure-body-relative bearing, one saturated sensed-duration band, an optional
+/// quantized body-schema displacement estimate, and coarse reorientation before it enters cognition.
 /// </para>
 /// <para>
 /// This is a passive body-sensory path, not a motor-control path. Voluntary movement blockers are
@@ -35,8 +35,9 @@ namespace Content.Server.COGR.Systems;
 /// </para>
 /// <para>
 /// MoveEvent frequency is never forwarded or counted as distance. Continuous native deltas are
-/// aggregated only to establish direction and continuity, while host elapsed time is used solely to
-/// choose a bounded psychophysical duration category.
+/// aggregated only inside the adapter, transformed into the departure-body frame, calibrated into
+/// body-schema lengths, quantized, and marked uncertain. Host elapsed time is used only to choose a
+/// bounded psychophysical duration category and to bound sensory publication cadence.
 /// </para>
 /// </remarks>
 public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
@@ -47,12 +48,18 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
     private const int DirectionChangeFlushSectors = 2;
     private const int RotationChangeFlushOctants = 2;
 
-    private static readonly TimeSpan MotionQuietPeriod = TimeSpan.FromMilliseconds(175);
-    // Continuous embodied motion is an ongoing sensory stream, not a multi-second batch. Emit at
-    // least once within the existing Brief psychophysical duration band so situated turnover cannot
-    // repeatedly outrun vestibular/kinesthetic evidence while still avoiding MoveEvent-count or
-    // distance-coupled sampling.
-    private static readonly TimeSpan MaximumMotionInterval = TimeSpan.FromMilliseconds(900);
+    // V2 proprioception is deliberately not an odometer. Native movement is first calibrated to the
+    // same owner-local body scale used by perception/action realization, then quantized before it is
+    // allowed across the cognition boundary. One twentieth of a body length preserves useful short-
+    // horizon displacement structure without forwarding adapter-native precision.
+    private const double TranslationSensationQuantumBodyLengths = 0.05d;
+    private const int TranslationSensationUncertaintyMillionths = 50_000;
+
+    // Ongoing embodied motion is a sensory stream. Bound aggregation near 8 Hz so current owner-frame
+    // estimates can advance repeatedly during locomotion without coupling publication to MoveEvent
+    // count or creating a Runtime cognitive tick. A short quiet flush preserves the terminal fragment.
+    private static readonly TimeSpan MotionQuietPeriod = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan MaximumMotionInterval = TimeSpan.FromMilliseconds(125);
     private static readonly TimeSpan MomentaryMaximum = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan BriefMaximum = TimeSpan.FromMilliseconds(900);
     private static readonly TimeSpan SustainedMaximum = TimeSpan.FromMilliseconds(2500);
@@ -125,7 +132,7 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
 
     /// <summary>
     /// Consumes one authoritative controlled-body movement event from the regional movement-event
-    /// owner. The event remains adapter-private and is reduced to bounded qualitative sensation.
+    /// owner. The event remains adapter-private and is reduced to bounded body-relative sensation.
     /// </summary>
     public void NotifyControlledBodyMoved(
         EntityUid uid,
@@ -369,12 +376,16 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
         var duration = hasQualitativeTranslation
             ? ClassifyDuration(pending.LastObservedAt - pending.FirstObservedAt)
             : ProprioceptiveMotionDurationBand.None;
+        var translationEstimate = hasQualitativeTranslation
+            ? CreateTranslationEstimate(pending.DepartureBodyTranslation)
+            : null;
 
         PublishEvidence(
             context,
             establishesContinuity: false,
             bearing,
             duration,
+            translationEstimate,
             rotationOctants,
             reason);
     }
@@ -401,6 +412,7 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
             establishesContinuity: true,
             BodyRelativeBearing.Unknown,
             ProprioceptiveMotionDurationBand.None,
+            translationEstimate: null,
             rotationOctants: 0,
             reason);
         _continuity[uid] = context.Key;
@@ -411,6 +423,7 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
         bool establishesContinuity,
         BodyRelativeBearing translationBearing,
         ProprioceptiveMotionDurationBand translationDuration,
+        ProprioceptiveOwnerFrameTranslationEstimate? translationEstimate,
         int rotationOctants,
         string reason)
     {
@@ -421,6 +434,7 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
             EstablishesContinuity = establishesContinuity,
             TranslationBearing = translationBearing,
             TranslationDuration = translationDuration,
+            TranslationEstimate = translationEstimate,
             RotationOctants = rotationOctants,
         };
 
@@ -441,13 +455,14 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
         if (COGRAdapterTrace.Enabled)
         {
             _sawmill.Info(
-                "[COGR][ProprioceptiveOwnerFrameMotionEmitted] agent={0} body={1} generation={2} baseline={3} bearing={4} duration={5} rotation_octants={6} reason={7}",
+                "[COGR][ProprioceptiveOwnerFrameMotionEmitted] agent={0} body={1} generation={2} baseline={3} bearing={4} duration={5} translation_estimate={6} rotation_octants={7} reason={8}",
                 context.AgentId,
                 context.BodyId,
                 context.BodyGeneration,
                 establishesContinuity,
                 translationBearing,
                 translationDuration,
+                FormatTranslationEstimate(translationEstimate),
                 rotationOctants,
                 reason);
         }
@@ -518,13 +533,69 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
     private static Vector2 ProjectIntoDepartureBodyFrame(Vector2 parentDelta, Angle departureRotation)
     {
         // Match the established COGR visual owner-frame convention: +X is forward and +Y is left.
-        // Exact native components remain inside Station and are immediately reduced to a bearing at emission.
+        // Exact native components remain inside Station and are reduced to actor-relative sensation
+        // before emission.
         var theta = departureRotation.Theta;
         var cos = Math.Cos(theta);
         var sin = Math.Sin(theta);
         var forward = (parentDelta.X * cos) + (parentDelta.Y * sin);
         var left = (-parentDelta.X * sin) + (parentDelta.Y * cos);
         return new Vector2((float)forward, (float)left);
+    }
+
+    private static ProprioceptiveOwnerFrameTranslationEstimate? CreateTranslationEstimate(
+        Vector2 departureBodyNative)
+    {
+        if (!float.IsFinite(departureBodyNative.X) || !float.IsFinite(departureBodyNative.Y))
+            return null;
+
+        try
+        {
+            var forwardBodyLengths = COGREmbodimentSpatialCalibration.NativeUnitsToLocalUnits(
+                COGREmbodimentSpatialCalibration.GenericHumanoidProfile,
+                departureBodyNative.X);
+            var leftBodyLengths = COGREmbodimentSpatialCalibration.NativeUnitsToLocalUnits(
+                COGREmbodimentSpatialCalibration.GenericHumanoidProfile,
+                departureBodyNative.Y);
+
+            var quantizedForward = QuantizeTranslationSensation(forwardBodyLengths);
+            var quantizedLeft = QuantizeTranslationSensation(leftBodyLengths);
+            return new ProprioceptiveOwnerFrameTranslationEstimate(
+                BodyRelativeSpatialComponent.FromBodyLengths(quantizedForward),
+                BodyRelativeSpatialComponent.FromBodyLengths(quantizedLeft),
+                0,
+                new PerceptualSpatialUncertainty(TranslationSensationUncertaintyMillionths));
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+        catch (OverflowException)
+        {
+            return null;
+        }
+    }
+
+    private static double QuantizeTranslationSensation(double bodyLengths)
+    {
+        if (!double.IsFinite(bodyLengths))
+            throw new ArgumentOutOfRangeException(nameof(bodyLengths));
+
+        return Math.Round(
+            bodyLengths / TranslationSensationQuantumBodyLengths,
+            MidpointRounding.AwayFromZero) * TranslationSensationQuantumBodyLengths;
+    }
+
+    private static string FormatTranslationEstimate(
+        ProprioceptiveOwnerFrameTranslationEstimate? estimate)
+    {
+        if (estimate is not { } value)
+            return "none";
+
+        return $"({BodyRelativeSpatialComponent.FormatBodyLengths(value.Forward)}," +
+               $"{BodyRelativeSpatialComponent.FormatBodyLengths(value.Left)}," +
+               $"{BodyRelativeSpatialComponent.FormatBodyLengths(value.Up)};u=" +
+               $"{value.Uncertainty.Millionths})";
     }
 
     private static BodyRelativeBearing QuantizeBearing(Vector2 departureBodyDelta)
