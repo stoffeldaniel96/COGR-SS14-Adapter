@@ -20,38 +20,51 @@ public sealed partial class ShowCOGRSpatialVisualizationCommand : LocalizedEntit
                 shell.WriteLine($"Currently tracking {current}.");
                 shell.WriteLine(
                     $"Resident belief targets: {_visualization.ResidentTargetCount}; "
-                    + $"world-space markers: {_visualization.ProjectedResidentTargetCount}; "
+                    + $"map markers: {_visualization.ProjectedResidentTargetCount}; "
                     + $"unprojectable in current owner frame: {_visualization.UnprojectableResidentTargetCount}; "
                     + $"rich active maintenance: {_visualization.RichlyMaintainedTargetCount}.");
-                shell.WriteLine("Calibration: perceivedLocal | belief|v|Local | actualTiles | actualCalibratedLocal (adapter body calibration).");
-                shell.WriteLine("Realization audit: local=(x,y) | expectedTiles | realizedTiles | perceptionSampleAgeTicks.");
+                shell.WriteLine("Signed audit: perceivedLocal -> beliefLocal -> ownerNative -> parentOffset -> realizedMapDelta; privileged actualMapDelta is comparison only.");
+                shell.WriteLine("Magnitude audit: perceivedLocal | belief|v|Local | expectedTiles | realizedTiles | actualTiles | actualCalibratedLocal.");
 
                 foreach (var target in _visualization.Targets
                              .OrderByDescending(static target => target.IsFocal)
                              .ThenByDescending(static target => target.IsRichlyMaintained)
                              .ThenBy(static target => target.TargetId, StringComparer.Ordinal))
                 {
-                    var hasBeliefMinusPerceived = target.HasPerceivedLocalRange;
-                    var beliefMinusPerceived = hasBeliefMinusPerceived
-                        ? target.BeliefVectorMagnitudeLocalUnits - target.PerceivedLocalRange
+                    var hasBeliefMinusPerceived = target.HasPerceivedLocalVector;
+                    var beliefMinusPerceivedX = hasBeliefMinusPerceived
+                        ? target.BeliefLocalX - target.PerceivedLocalX
                         : 0.0;
-                    var hasPerceivedMinusActual = target.HasPerceivedLocalRange
-                                                 && target.HasActualDistanceCalibratedLocalUnits;
-                    var perceivedMinusActual = hasPerceivedMinusActual
-                        ? target.PerceivedLocalRange - target.ActualDistanceCalibratedLocalUnits
+                    var beliefMinusPerceivedY = hasBeliefMinusPerceived
+                        ? target.BeliefLocalY - target.PerceivedLocalY
                         : 0.0;
+                    var hasRealizedMinusActual = target.HasActualMapDelta;
+                    var realizedMinusActualX = hasRealizedMinusActual
+                        ? target.BeliefRealizedMapDeltaX - target.ActualMapDeltaX
+                        : 0.0;
+                    var realizedMinusActualY = hasRealizedMinusActual
+                        ? target.BeliefRealizedMapDeltaY - target.ActualMapDeltaY
+                        : 0.0;
+
                     shell.WriteLine(
                         $"  target={target.TargetId} rev={target.TargetRevision} focal={target.IsFocal} rich={target.IsRichlyMaintained} "
-                        + $"local=({target.BeliefLocalX:F4},{target.BeliefLocalY:F4}) "
+                        + $"perceivedLocal={FormatVector(target.HasPerceivedLocalVector, target.PerceivedLocalX, target.PerceivedLocalY)} "
+                        + $"sampleTick={(target.HasPerceivedLocalVector ? target.PerceivedSampleTick.ToString() : "n/a")} "
+                        + $"sampleAgeTicks={(target.HasPerceivedLocalVector ? target.PerceivedSampleAgeTicks.ToString() : "n/a")} "
+                        + $"beliefLocal=({target.BeliefLocalX:F4},{target.BeliefLocalY:F4}) "
+                        + $"belief-perceived={FormatVector(hasBeliefMinusPerceived, beliefMinusPerceivedX, beliefMinusPerceivedY)} "
+                        + $"ownerNative=({target.BeliefOwnerRelativeNativeX:F4},{target.BeliefOwnerRelativeNativeY:F4}) "
+                        + $"bodyLocalRot={target.BodyLocalRotationRadians:F4}rad "
+                        + $"parentOffset=({target.BeliefParentOffsetX:F4},{target.BeliefParentOffsetY:F4}) "
+                        + $"realizedMapDelta=({target.BeliefRealizedMapDeltaX:F4},{target.BeliefRealizedMapDeltaY:F4}) "
+                        + $"actualMapDelta={FormatVector(target.HasActualMapDelta, target.ActualMapDeltaX, target.ActualMapDeltaY)} "
+                        + $"realized-actual={FormatVector(hasRealizedMinusActual, realizedMinusActualX, realizedMinusActualY)} "
+                        + $"perceivedRange={Format(target.HasPerceivedLocalRange, target.PerceivedLocalRange)} "
+                        + $"belief|v|Local={target.BeliefVectorMagnitudeLocalUnits:F4} "
                         + $"expectedTiles={target.BeliefExpectedDistanceTiles:F4} "
                         + $"realizedTiles={target.BeliefRealizedDistanceTiles:F4} "
-                        + $"perceivedLocal={Format(target.HasPerceivedLocalRange, target.PerceivedLocalRange)} "
-                        + $"sampleAgeTicks={(target.HasPerceivedLocalRange ? target.PerceivedSampleAgeTicks.ToString() : "n/a")} "
-                        + $"belief|v|Local={target.BeliefVectorMagnitudeLocalUnits:F4} "
                         + $"actualTiles={Format(target.HasActualDistanceTiles, target.ActualDistanceTiles)} "
-                        + $"actualCalibratedLocal={Format(target.HasActualDistanceCalibratedLocalUnits, target.ActualDistanceCalibratedLocalUnits)} "
-                        + $"belief-perceived={Format(hasBeliefMinusPerceived, beliefMinusPerceived)} "
-                        + $"perceived-actual={Format(hasPerceivedMinusActual, perceivedMinusActual)}");
+                        + $"actualCalibratedLocal={Format(target.HasActualDistanceCalibratedLocalUnits, target.ActualDistanceCalibratedLocalUnits)}");
                 }
             }
             return;
@@ -75,8 +88,11 @@ public sealed partial class ShowCOGRSpatialVisualizationCommand : LocalizedEntit
         shell.WriteLine($"COGR spatial visualization tracking {agentId}.");
         shell.WriteLine("Belief targets render blue; explicit perceptual focus renders red; resolved Coggent body origin renders cyan; privileged current actual referent renders yellow.");
         shell.WriteLine("Markers retire only when a successful Runtime full frame no longer reports that resident target.");
-        shell.WriteLine("Run 'showcogrspatial' with no argument to inspect counts, calibration, sample age, and realization invariants.");
+        shell.WriteLine("Run 'showcogrspatial' with no argument to inspect signed projection, sample age, TargetId/revision, and calibration invariants.");
     }
 
     private static string Format(bool hasValue, double value) => hasValue ? value.ToString("F4") : "n/a";
+
+    private static string FormatVector(bool hasValue, double x, double y) =>
+        hasValue ? $"({x:F4},{y:F4})" : "n/a";
 }
