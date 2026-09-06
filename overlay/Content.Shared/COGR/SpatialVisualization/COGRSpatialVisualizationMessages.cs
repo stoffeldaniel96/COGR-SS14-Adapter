@@ -25,23 +25,39 @@ public sealed class COGRSpatialVisualizationTarget
     public bool HasActual;
     public MapCoordinates Actual;
 
-    // Realization self-checks are privileged diagnostics only. Expected and realized tile distances must agree because
-    // rotation preserves vector magnitude; disagreement isolates adapter realization before client rendering is considered.
+    // Signed realization self-checks are privileged diagnostics only. They expose each coordinate-space transition so
+    // sign inversions, axis swaps, origin errors, and scale errors can be distinguished without feeding Station truth back
+    // into cognition or action selection.
     public double BeliefLocalX;
     public double BeliefLocalY;
+    public double BeliefExpectedNativeX;
+    public double BeliefExpectedNativeY;
+    public double BodyWorldRotationRadians;
+    public double BeliefExpectedWorldDeltaX;
+    public double BeliefExpectedWorldDeltaY;
+    public double BeliefRealizedWorldDeltaX;
+    public double BeliefRealizedWorldDeltaY;
     public double BeliefExpectedDistanceTiles;
     public double BeliefRealizedDistanceTiles;
 
-    // Calibration diagnostics are privileged observations only. They never flow back into COGR cognition.
+    // Perception-side samples are the exact signed adapter-local components emitted as spatial evidence at one observation
+    // tick. Sample age is explicit because current Station truth may legitimately differ after either body moves.
     public bool HasPerceivedLocalRange;
     public double PerceivedLocalRange;
+    public bool HasPerceivedLocalVector;
+    public double PerceivedLocalX;
+    public double PerceivedLocalY;
     public ulong PerceivedSampleTick;
     public ulong PerceivedSampleAgeTicks;
+
     public double BeliefVectorMagnitudeLocalUnits;
     public bool HasActualDistanceTiles;
     public double ActualDistanceTiles;
     public bool HasActualDistanceCalibratedLocalUnits;
     public double ActualDistanceCalibratedLocalUnits;
+    public bool HasActualWorldDelta;
+    public double ActualWorldDeltaX;
+    public double ActualWorldDeltaY;
 }
 
 /// <summary>One transient remembered-route polyline in authoritative map coordinates.</summary>
