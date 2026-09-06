@@ -11,25 +11,26 @@ namespace Content.Client.COGR;
 /// <summary>Client-only admin visualization of one selected Coggent's cognition-owned spatial beliefs.</summary>
 public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
 {
-    private static readonly TimeSpan TargetLifetime = TimeSpan.FromSeconds(2.0);
     private static readonly TimeSpan PathLifetime = TimeSpan.FromSeconds(2.0);
 
     [Dependency] private IOverlayManager _overlayManager = default!;
     [Dependency] private IGameTiming _timing = default!;
 
-    private readonly Dictionary<string, TimedTarget> _targets = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, COGRSpatialVisualizationTarget> _targets = new(StringComparer.Ordinal);
     private readonly Dictionary<ulong, TimedPath> _paths = [];
     private string? _trackedAgentId;
-    private int _trackedTargetCount;
-    private int _unprojectableTrackedTargetCount;
+    private int _residentTargetCount;
+    private int _richlyMaintainedTargetCount;
+    private int _unprojectableResidentTargetCount;
 
     public bool Enabled => _trackedAgentId is not null;
     public string? TrackedAgentId => _trackedAgentId;
-    public int TrackedTargetCount => _trackedTargetCount;
-    public int UnprojectableTrackedTargetCount => _unprojectableTrackedTargetCount;
-    public int ProjectedTrackedTargetCount => _targets.Count;
+    public int ResidentTargetCount => _residentTargetCount;
+    public int RichlyMaintainedTargetCount => _richlyMaintainedTargetCount;
+    public int UnprojectableResidentTargetCount => _unprojectableResidentTargetCount;
+    public int ProjectedResidentTargetCount => _targets.Count;
 
-    internal Dictionary<string, TimedTarget>.ValueCollection Targets => _targets.Values;
+    internal Dictionary<string, COGRSpatialVisualizationTarget>.ValueCollection Targets => _targets.Values;
     internal Dictionary<ulong, TimedPath>.ValueCollection Paths => _paths.Values;
 
     public override void Initialize()
@@ -99,11 +100,9 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         if (!Enabled)
             return;
 
-        // Lifetimes are disconnect/failure containment only. Normal deletion is authoritative full-frame reconciliation in
-        // OnVisualizationMessage, so a stationary belief marker remains visible as long as Runtime continues reporting it.
+        // Remembered-route paths are transient diagnostic events. Belief targets are retained until a successful Runtime
+        // full frame authoritatively omits them; a local transport timeout must never masquerade as cognitive retirement.
         var now = _timing.RealTime;
-        foreach (var key in _targets.Where(pair => pair.Value.ExpiresAt <= now).Select(static pair => pair.Key).ToArray())
-            _targets.Remove(key);
         foreach (var sequence in _paths.Where(pair => pair.Value.ExpiresAt <= now).Select(static pair => pair.Key).ToArray())
             _paths.Remove(sequence);
     }
@@ -116,18 +115,20 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
             return;
         }
 
-        _trackedTargetCount = Math.Max(0, message.TrackedTargetCount);
-        _unprojectableTrackedTargetCount = Math.Clamp(
-            message.UnprojectableTrackedTargetCount,
+        _residentTargetCount = Math.Max(0, message.ResidentTargetCount);
+        _richlyMaintainedTargetCount = Math.Clamp(
+            message.RichlyMaintainedTargetCount,
             0,
-            _trackedTargetCount);
+            _residentTargetCount);
+        _unprojectableResidentTargetCount = Math.Clamp(
+            message.UnprojectableResidentTargetCount,
+            0,
+            _residentTargetCount);
 
-        var now = _timing.RealTime;
         var currentKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var target in message.Targets)
         {
-            if (!target.IsTracked
-                || !string.Equals(target.AgentId, _trackedAgentId, StringComparison.OrdinalIgnoreCase)
+            if (!string.Equals(target.AgentId, _trackedAgentId, StringComparison.OrdinalIgnoreCase)
                 || string.IsNullOrWhiteSpace(target.TargetId))
             {
                 continue;
@@ -135,12 +136,13 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
 
             var key = string.Concat(target.AgentId, ":", target.TargetId);
             currentKeys.Add(key);
-            _targets[key] = new TimedTarget(target, now + TargetLifetime);
+            _targets[key] = target;
         }
 
         foreach (var key in _targets.Keys.Where(key => !currentKeys.Contains(key)).ToArray())
             _targets.Remove(key);
 
+        var now = _timing.RealTime;
         foreach (var path in message.Paths)
         {
             if (path.Points.Length < 2)
@@ -153,15 +155,15 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
     {
         _targets.Clear();
         _paths.Clear();
-        _trackedTargetCount = 0;
-        _unprojectableTrackedTargetCount = 0;
+        _residentTargetCount = 0;
+        _richlyMaintainedTargetCount = 0;
+        _unprojectableResidentTargetCount = 0;
     }
 
-    internal sealed record TimedTarget(COGRSpatialVisualizationTarget Target, TimeSpan ExpiresAt);
     internal sealed record TimedPath(MapCoordinates[] Points, TimeSpan ExpiresAt);
 }
 
-/// <summary>World-space renderer for cognition-owned tracked belief positions and remembered-route diagnostics.</summary>
+/// <summary>World-space renderer for cognition-owned resident belief positions and remembered-route diagnostics.</summary>
 public sealed class COGRSpatialVisualizationOverlay : Overlay
 {
     private const float EndpointMarkerRadius = 0.09f;
@@ -178,13 +180,12 @@ public sealed class COGRSpatialVisualizationOverlay : Overlay
     {
         var handle = args.WorldHandle;
 
-        // Blue means rich active belief-target maintenance. Red is the Runtime's explicit current perceptual-attention
-        // focus among those tracked targets. Neither color uses authoritative target location or movement intent, so spatial
-        // belief error remains visible instead of being repaired or conflated with Station truth.
-        foreach (var timed in _system.Targets)
+        // Blue means a current resident belief-target representation. Red is the Runtime's explicit current perceptual-
+        // attention focus. Rich active maintenance is carried separately in the diagnostic payload and must not determine
+        // whether a resident target is visible. No color uses authoritative target location or movement intent.
+        foreach (var target in _system.Targets)
         {
-            var target = timed.Target;
-            if (!target.IsTracked || target.Belief.MapId != args.MapId)
+            if (target.Belief.MapId != args.MapId)
                 continue;
             DrawCross(handle, target.Belief.Position, target.IsFocal ? Color.Red : Color.Blue);
         }
