@@ -48,17 +48,24 @@ public sealed partial class COGRBoundedPerceptionSystem
             registry);
         var features = CreateFeatures(observer, candidate);
 
-        // Capture exactly the adapter-normalized distance emitted as spatial/local_distance. This is privileged
+        // Capture the exact signed adapter-local spatial sample emitted as perceptual evidence. This is privileged
         // observability only: recording is inactive without an admin spatial-debug subscriber and never feeds Runtime.
-        var diagnosticLocalDistance = QuantizeLocalComponent(
-            COGREmbodimentSpatialCalibration.NativeUnitsToLocalUnits(
-                COGREmbodimentSpatialCalibration.GenericHumanoidProfile,
-                candidate.Distance));
-        COGRSpatialCalibrationDiagnosticCache.Record(
-            request.AgentId,
-            environmentReference,
-            diagnosticLocalDistance,
-            currentTick.Value);
+        if (TryComputeLocalSpatialProjection(
+                observer,
+                candidate.Entity,
+                candidate.Distance,
+                out var diagnosticLocalX,
+                out var diagnosticLocalY,
+                out var diagnosticLocalDistance))
+        {
+            COGRSpatialCalibrationDiagnosticCache.Record(
+                request.AgentId,
+                environmentReference,
+                diagnosticLocalX,
+                diagnosticLocalY,
+                diagnosticLocalDistance,
+                currentTick.Value);
+        }
 
         var distanceRatio = observedRange <= 0
             ? 1.0
