@@ -30,13 +30,13 @@ public sealed class COGRSpatialVisualizationTarget
     // into cognition or action selection.
     public double BeliefLocalX;
     public double BeliefLocalY;
-    public double BeliefExpectedNativeX;
-    public double BeliefExpectedNativeY;
-    public double BodyWorldRotationRadians;
-    public double BeliefExpectedWorldDeltaX;
-    public double BeliefExpectedWorldDeltaY;
-    public double BeliefRealizedWorldDeltaX;
-    public double BeliefRealizedWorldDeltaY;
+    public double BeliefOwnerRelativeNativeX;
+    public double BeliefOwnerRelativeNativeY;
+    public double BodyLocalRotationRadians;
+    public double BeliefParentOffsetX;
+    public double BeliefParentOffsetY;
+    public double BeliefRealizedMapDeltaX;
+    public double BeliefRealizedMapDeltaY;
     public double BeliefExpectedDistanceTiles;
     public double BeliefRealizedDistanceTiles;
 
@@ -55,9 +55,9 @@ public sealed class COGRSpatialVisualizationTarget
     public double ActualDistanceTiles;
     public bool HasActualDistanceCalibratedLocalUnits;
     public double ActualDistanceCalibratedLocalUnits;
-    public bool HasActualWorldDelta;
-    public double ActualWorldDeltaX;
-    public double ActualWorldDeltaY;
+    public bool HasActualMapDelta;
+    public double ActualMapDeltaX;
+    public double ActualMapDeltaY;
 }
 
 /// <summary>One transient remembered-route polyline in authoritative map coordinates.</summary>
