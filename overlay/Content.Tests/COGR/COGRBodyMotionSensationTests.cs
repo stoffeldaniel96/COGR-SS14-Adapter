@@ -2,7 +2,9 @@ using System;
 using System.Linq;
 using System.Numerics;
 using System.Reflection;
+using COGR.Contracts.Messages;
 using COGR.Core.Perception;
+using COGR.Core.Time;
 using Content.Server.COGR.Systems;
 using Content.Shared.Mobs;
 using NUnit.Framework;
@@ -142,25 +144,56 @@ public sealed class COGRBodyMotionSensationTests
     }
 
     [Test]
-    public void PendingAggregation_DoesNotRetainEventCountDistanceSpeedOrTicks()
+    public void PendingAggregation_RetainsTemporalProvenanceWithoutOdometerState()
     {
         var pendingType = SystemType.GetNestedType("PendingMotion", BindingFlags.NonPublic);
         Assert.That(pendingType, Is.Not.Null);
 
-        var names = pendingType!
+        var properties = pendingType!
             .GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            .Select(static property => property.Name)
-            .Concat(
-                pendingType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                    .Select(static field => field.Name))
+            .ToArray();
+        var fields = pendingType
+            .GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .ToArray();
+        var names = properties.Select(static property => property.Name)
+            .Concat(fields.Select(static field => field.Name))
             .ToArray();
         var hasOdometerLikeState = names.Any(static name =>
             name.Contains("Count", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("Distance", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("Speed", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("Tick", StringComparison.OrdinalIgnoreCase));
+            name.Contains("Speed", StringComparison.OrdinalIgnoreCase));
 
         Assert.That(hasOdometerLikeState, Is.False);
+        Assert.That(
+            properties.Single(property => property.Name == "FirstObservedTick").PropertyType,
+            Is.EqualTo(typeof(SimTick)));
+        Assert.That(
+            properties.Single(property => property.Name == "LastObservedTick").PropertyType,
+            Is.EqualTo(typeof(SimTick)));
+    }
+
+    [Test]
+    public void VisualSceneSampling_HasExplicitBodyMotionPartitionSeam()
+    {
+        var boundary = SystemType.GetMethod(
+            "NotifyVisualSamplingBoundary",
+            BindingFlags.Instance | BindingFlags.Public);
+        Assert.That(boundary, Is.Not.Null);
+        Assert.That(boundary!.ReturnType, Is.EqualTo(typeof(void)));
+
+        var replicaBodyMotion = typeof(COGRSemanticReplicaSystem).GetField(
+            "_bodyMotion",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(replicaBodyMotion, Is.Not.Null);
+        Assert.That(replicaBodyMotion!.FieldType, Is.EqualTo(typeof(COGRBodyMotionSensationSystem)));
+    }
+
+    [Test]
+    public void CanonicalBodyMotionWire_IsTemporalV3()
+    {
+        Assert.That(
+            ProprioceptiveOwnerFrameMotionEvidenceWireCodec.Format,
+            Is.EqualTo("cogr.proprioceptive-owner-frame-motion.v3+json"));
     }
 
     [Test]
