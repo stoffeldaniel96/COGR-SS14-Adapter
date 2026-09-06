@@ -4,6 +4,7 @@ using COGR.Core.Actions;
 using COGR.Core.Actions.Parameters;
 using COGR.Core.Identifiers;
 using COGR.Core.Time;
+using Content.Server.COGR.Systems;
 using Content.Server.NPC.Components;
 using Content.Shared.COGR.Components;
 using Content.Shared.Movement.Components;
@@ -109,6 +110,29 @@ public sealed partial class COGRActionExecutor
             return ActionExecutionResult.Failed(
                 ActionFailureReason.Unspecified,
                 "Native steering exposes no finite positive arrival range for projected objective completion");
+        }
+
+        // Feed the exact live native control resolution back through the bounded normalized embodiment evidence channel.
+        // Cognition may use that evidence prospectively on later attempts, but Station remains authoritative over this attempt.
+        if (EntityManager.TrySystem<COGRLocomotorRealizabilitySystem>(out var realizabilitySystem))
+            realizabilitySystem.ObserveProjectedSteeringRange(attempt, steering.Range);
+
+        // Do not ask native NPC steering to realize a displacement it already classifies as arrived. This is an
+        // authoritative successful no-op at the embodiment boundary, not silent vector clamping or target mutation.
+        if (IsProjectedObjectiveAlreadyWithinArrivalTolerance(directDistance, arrivalTolerance))
+        {
+            _npcSteering.Unregister(entity.Value);
+            RemComp<ActiveNPCComponent>(entity.Value);
+            if (COGRAdapterTrace.Enabled)
+            {
+                _sawmill.Debug(
+                    "COGR projected objective already within native arrival resolution: proposal={0} directDistance={1:F3} arrivalRange={2:F3}",
+                    attempt.ProposalId,
+                    directDistance,
+                    arrivalTolerance);
+            }
+
+            return ActionExecutionResult.Completed(null);
         }
 
         steering.Status = SteeringStatus.Moving;
@@ -402,6 +426,15 @@ public sealed partial class COGRActionExecutor
         arrivalTolerance = nativeSteeringRange;
         return float.IsFinite(nativeSteeringRange) && nativeSteeringRange > 0f;
     }
+
+    private static bool IsProjectedObjectiveAlreadyWithinArrivalTolerance(
+        float directDistance,
+        float arrivalTolerance) =>
+        float.IsFinite(directDistance)
+        && float.IsFinite(arrivalTolerance)
+        && directDistance > 0f
+        && arrivalTolerance > 0f
+        && directDistance <= arrivalTolerance;
 
     private static Vector2 OwnerRelativeObjectiveToParentOffset(Vector2 ownerRelativeOffset, Angle localRotation)
     {
