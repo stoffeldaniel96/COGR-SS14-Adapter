@@ -24,6 +24,7 @@ public sealed partial class ShowCOGRSpatialVisualizationCommand : LocalizedEntit
                     + $"unprojectable in current owner frame: {_visualization.UnprojectableResidentTargetCount}; "
                     + $"rich active maintenance: {_visualization.RichlyMaintainedTargetCount}.");
                 shell.WriteLine("Calibration: perceivedLocal | belief|v|Local | actualTiles | actualCalibratedLocal (adapter body calibration).");
+                shell.WriteLine("Realization audit: local=(x,y) | expectedTiles | realizedTiles | perceptionSampleAgeTicks.");
 
                 foreach (var target in _visualization.Targets
                              .OrderByDescending(static target => target.IsFocal)
@@ -41,7 +42,11 @@ public sealed partial class ShowCOGRSpatialVisualizationCommand : LocalizedEntit
                         : 0.0;
                     shell.WriteLine(
                         $"  target={target.TargetId} rev={target.TargetRevision} focal={target.IsFocal} rich={target.IsRichlyMaintained} "
+                        + $"local=({target.BeliefLocalX:F4},{target.BeliefLocalY:F4}) "
+                        + $"expectedTiles={target.BeliefExpectedDistanceTiles:F4} "
+                        + $"realizedTiles={target.BeliefRealizedDistanceTiles:F4} "
                         + $"perceivedLocal={Format(target.HasPerceivedLocalRange, target.PerceivedLocalRange)} "
+                        + $"sampleAgeTicks={(target.HasPerceivedLocalRange ? target.PerceivedSampleAgeTicks.ToString() : "n/a")} "
                         + $"belief|v|Local={target.BeliefVectorMagnitudeLocalUnits:F4} "
                         + $"actualTiles={Format(target.HasActualDistanceTiles, target.ActualDistanceTiles)} "
                         + $"actualCalibratedLocal={Format(target.HasActualDistanceCalibratedLocalUnits, target.ActualDistanceCalibratedLocalUnits)} "
@@ -68,9 +73,9 @@ public sealed partial class ShowCOGRSpatialVisualizationCommand : LocalizedEntit
         var agentId = agentGuid.ToString("D");
         _visualization.TrackAgent(agentId);
         shell.WriteLine($"COGR spatial visualization tracking {agentId}.");
-        shell.WriteLine("Resident spatial belief targets render blue; the explicit perceptual-attention focus renders red.");
+        shell.WriteLine("Belief targets render blue; explicit perceptual focus renders red; resolved Coggent body origin renders cyan; privileged current actual referent renders yellow.");
         shell.WriteLine("Markers retire only when a successful Runtime full frame no longer reports that resident target.");
-        shell.WriteLine("Run 'showcogrspatial' with no argument to inspect counts and the per-target calibration tuple.");
+        shell.WriteLine("Run 'showcogrspatial' with no argument to inspect counts, calibration, sample age, and realization invariants.");
     }
 
     private static string Format(bool hasValue, double value) => hasValue ? value.ToString("F4") : "n/a";
