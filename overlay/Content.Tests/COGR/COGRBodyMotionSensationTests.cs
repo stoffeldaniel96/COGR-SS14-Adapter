@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Numerics;
 using System.Reflection;
+using COGR.Core.Perception;
 using Content.Server.COGR.Systems;
 using Content.Shared.Mobs;
 using NUnit.Framework;
@@ -91,15 +92,53 @@ public sealed class COGRBodyMotionSensationTests
     }
 
     [Test]
-    public void AggregationCadence_RefreshesContinuousMotionWithinBriefBand()
+    public void AggregationCadence_RefreshesContinuousMotionWithinShortSensorInterval()
     {
         var quiet = RequireStaticTimeSpan("MotionQuietPeriod");
         var maximum = RequireStaticTimeSpan("MaximumMotionInterval");
         var briefMaximum = RequireStaticTimeSpan("BriefMaximum");
 
-        Assert.That(quiet, Is.GreaterThanOrEqualTo(TimeSpan.FromMilliseconds(100)));
+        Assert.That(quiet, Is.GreaterThanOrEqualTo(TimeSpan.FromMilliseconds(75)));
+        Assert.That(quiet, Is.LessThanOrEqualTo(TimeSpan.FromMilliseconds(125)));
         Assert.That(maximum, Is.GreaterThan(quiet));
-        Assert.That(maximum, Is.LessThanOrEqualTo(briefMaximum));
+        Assert.That(maximum, Is.GreaterThanOrEqualTo(TimeSpan.FromMilliseconds(100)));
+        Assert.That(maximum, Is.LessThanOrEqualTo(TimeSpan.FromMilliseconds(150)));
+        Assert.That(maximum, Is.LessThan(briefMaximum));
+    }
+
+    [Test]
+    public void ContinuousTranslationEstimate_UsesSharedCalibrationAndBoundedQuantization()
+    {
+        var create = RequireStaticMethod("CreateTranslationEstimate", typeof(Vector2));
+
+        // Generic humanoid calibration is 0.70 native units per body-schema length. These deliberately
+        // non-round native inputs would expose adapter precision if the sensory boundary did not quantize.
+        var result = create.Invoke(null, [new Vector2(0.713f, -0.349f)]);
+
+        Assert.That(result, Is.Not.Null);
+        var estimate = (ProprioceptiveOwnerFrameTranslationEstimate)result!;
+        Assert.That(
+            BodyRelativeSpatialComponent.ToBodyLengths(estimate.Forward),
+            Is.EqualTo(1d).Within(0.000001d));
+        Assert.That(
+            BodyRelativeSpatialComponent.ToBodyLengths(estimate.Left),
+            Is.EqualTo(-0.5d).Within(0.000001d));
+        Assert.That(estimate.Up, Is.Zero);
+        Assert.That(estimate.Uncertainty.Millionths, Is.EqualTo(50_000));
+    }
+
+    [Test]
+    public void ContinuousTranslationEstimate_DoesNotFallBackToDurationMagnitudeForTinyMotion()
+    {
+        var create = RequireStaticMethod("CreateTranslationEstimate", typeof(Vector2));
+
+        var result = create.Invoke(null, [new Vector2(0.01f, 0f)]);
+
+        Assert.That(result, Is.Not.Null);
+        var estimate = (ProprioceptiveOwnerFrameTranslationEstimate)result!;
+        Assert.That(estimate.Forward, Is.Zero);
+        Assert.That(estimate.Left, Is.Zero);
+        Assert.That(estimate.Uncertainty.Millionths, Is.EqualTo(50_000));
     }
 
     [Test]
