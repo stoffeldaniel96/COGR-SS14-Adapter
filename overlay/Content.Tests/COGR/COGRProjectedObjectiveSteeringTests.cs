@@ -14,6 +14,9 @@ namespace Content.Tests.COGR;
 public sealed class COGRProjectedObjectiveSteeringTests
 {
     private static readonly Type ExecutorType = typeof(COGRActionExecutor);
+    private static readonly Type ProjectionType = typeof(COGRActionExecutor).Assembly.GetType(
+        "Content.Server.COGR.COGREmbodimentSpatialProjection",
+        throwOnError: true)!;
 
     [Test]
     public void PlanarObjective_UsesInverseEmbodimentCalibrationWithoutOctantSnap()
@@ -36,15 +39,63 @@ public sealed class COGRProjectedObjectiveSteeringTests
     }
 
     [Test]
-    public void CurrentBodyRotation_ProjectsObjectiveIntoCurrentParentFrame()
+    public void CurrentBodyRotation_ProjectsObjectiveThroughSharedParentFrameTransform()
     {
-        var rotate = RequireStaticMethod("OwnerRelativeObjectiveToParentOffset");
-        var projected = (Vector2)rotate.Invoke(
-            null,
-            [new Vector2(0.70f, 0f), new Angle(Math.PI / 2d)])!;
+        var project = RequireProjectionMethod("TryOwnerRelativeLocalToParentOffset");
+        object?[] args =
+        [
+            1d,
+            0d,
+            new Angle(Math.PI / 2d),
+            Vector2.Zero,
+            Vector2.Zero,
+        ];
 
-        Assert.That(projected.X, Is.EqualTo(0f).Within(0.00001f));
-        Assert.That(projected.Y, Is.EqualTo(0.70f).Within(0.00001f));
+        var accepted = (bool)project.Invoke(null, args)!;
+
+        Assert.That(accepted, Is.True);
+        var ownerRelativeNative = (Vector2)args[3]!;
+        var parentOffset = (Vector2)args[4]!;
+        Assert.That(ownerRelativeNative.X, Is.EqualTo(0.70f).Within(0.00001f));
+        Assert.That(ownerRelativeNative.Y, Is.EqualTo(0f).Within(0.00001f));
+        Assert.That(parentOffset.X, Is.EqualTo(0f).Within(0.00001f));
+        Assert.That(parentOffset.Y, Is.EqualTo(0.70f).Within(0.00001f));
+    }
+
+    [TestCase(0d)]
+    [TestCase(0.37d)]
+    [TestCase(1.5707963267948966d)]
+    [TestCase(-2.2d)]
+    public void SharedParentFrameProjection_InverseRecoversOwnerRelativeLocalVector(double rotationRadians)
+    {
+        var project = RequireProjectionMethod("TryOwnerRelativeLocalToParentOffset");
+        object?[] forwardArgs =
+        [
+            1.25d,
+            -0.4d,
+            new Angle(rotationRadians),
+            Vector2.Zero,
+            Vector2.Zero,
+        ];
+
+        var projected = (bool)project.Invoke(null, forwardArgs)!;
+        Assert.That(projected, Is.True);
+        var parentOffset = (Vector2)forwardArgs[4]!;
+
+        var inverse = RequireProjectionMethod("TryParentOffsetToOwnerRelativeLocal");
+        object?[] inverseArgs =
+        [
+            parentOffset,
+            new Angle(rotationRadians),
+            0d,
+            0d,
+        ];
+
+        var recovered = (bool)inverse.Invoke(null, inverseArgs)!;
+
+        Assert.That(recovered, Is.True);
+        Assert.That((double)inverseArgs[2]!, Is.EqualTo(1.25d).Within(0.00001d));
+        Assert.That((double)inverseArgs[3]!, Is.EqualTo(-0.4d).Within(0.00001d));
     }
 
     [Test]
@@ -155,4 +206,10 @@ public sealed class COGRProjectedObjectiveSteeringTests
             name,
             BindingFlags.Static | BindingFlags.NonPublic)
         ?? throw new AssertionException($"Expected private static method '{name}' was not found.");
+
+    private static MethodInfo RequireProjectionMethod(string name) =>
+        ProjectionType.GetMethod(
+            name,
+            BindingFlags.Static | BindingFlags.NonPublic)
+        ?? throw new AssertionException($"Expected shared spatial projection method '{name}' was not found.");
 }
