@@ -5,7 +5,7 @@ using COGR.Core.Perception;
 namespace Content.Server.COGR.Systems;
 
 /// <summary>
-/// Adapter-only, admin-observability cache for the exact normalized range emitted with perceptual observations.
+/// Adapter-only, admin-observability cache for the exact normalized spatial sample emitted with perceptual observations.
 /// It is enabled only while a Coggent has an active spatial-debug subscriber. Values never flow back into Runtime and
 /// therefore cannot repair, bias, or otherwise influence cognition.
 /// </summary>
@@ -15,9 +15,13 @@ internal static class COGRSpatialCalibrationDiagnosticCache
 
     private static readonly object Gate = new();
     private static readonly HashSet<AgentId> EnabledAgents = [];
-    private static readonly Dictionary<AgentId, Dictionary<EnvironmentRef, PerceivedRangeSample>> Samples = [];
+    private static readonly Dictionary<AgentId, Dictionary<EnvironmentRef, PerceivedSpatialSample>> Samples = [];
 
-    internal sealed record PerceivedRangeSample(double LocalDistance, ulong ObservedTick);
+    internal sealed record PerceivedSpatialSample(
+        double LocalX,
+        double LocalY,
+        double LocalDistance,
+        ulong ObservedTick);
 
     internal static void SetEnabled(AgentId agentId, bool enabled)
     {
@@ -40,11 +44,15 @@ internal static class COGRSpatialCalibrationDiagnosticCache
     internal static void Record(
         AgentId agentId,
         EnvironmentRef environmentReference,
+        double localX,
+        double localY,
         double localDistance,
         ulong observedTick)
     {
         if (!agentId.IsAssigned
             || !environmentReference.IsAssigned
+            || !double.IsFinite(localX)
+            || !double.IsFinite(localY)
             || !double.IsFinite(localDistance)
             || localDistance < 0.0)
         {
@@ -72,14 +80,18 @@ internal static class COGRSpatialCalibrationDiagnosticCache
                 byReference.Remove(oldest.Key);
             }
 
-            byReference[environmentReference] = new PerceivedRangeSample(localDistance, observedTick);
+            byReference[environmentReference] = new PerceivedSpatialSample(
+                localX,
+                localY,
+                localDistance,
+                observedTick);
         }
     }
 
     internal static bool TryGet(
         AgentId agentId,
         EnvironmentRef environmentReference,
-        out PerceivedRangeSample? sample)
+        out PerceivedSpatialSample? sample)
     {
         lock (Gate)
         {
