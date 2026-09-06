@@ -20,11 +20,23 @@ public sealed class COGRSpatialVisualizationTarget
     public ulong TargetRevision;
     public bool IsRichlyMaintained;
     public bool IsFocal;
+    public MapCoordinates BodyOrigin;
     public MapCoordinates Belief;
+    public bool HasActual;
+    public MapCoordinates Actual;
+
+    // Realization self-checks are privileged diagnostics only. Expected and realized tile distances must agree because
+    // rotation preserves vector magnitude; disagreement isolates adapter realization before client rendering is considered.
+    public double BeliefLocalX;
+    public double BeliefLocalY;
+    public double BeliefExpectedDistanceTiles;
+    public double BeliefRealizedDistanceTiles;
 
     // Calibration diagnostics are privileged observations only. They never flow back into COGR cognition.
     public bool HasPerceivedLocalRange;
     public double PerceivedLocalRange;
+    public ulong PerceivedSampleTick;
+    public ulong PerceivedSampleAgeTicks;
     public double BeliefVectorMagnitudeLocalUnits;
     public bool HasActualDistanceTiles;
     public double ActualDistanceTiles;
