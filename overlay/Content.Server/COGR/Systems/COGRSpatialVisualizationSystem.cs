@@ -274,7 +274,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
             }
 
             // Send every successful poll, including an empty target set. The empty full frame is the authoritative debug
-            // deletion signal for beliefs that COGR no longer reports.
+            // deletion signal for resident belief targets that COGR no longer reports.
             RaiseNetworkEvent(message, subscriber.Channel);
         }
     }
@@ -284,8 +284,9 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         var empty = new COGRSpatialVisualizationMessage
         {
             AgentId = payload.AgentId,
-            TrackedTargetCount = payload.TrackedTargetCount,
-            UnprojectableTrackedTargetCount = payload.UnprojectableTrackedTargetCount,
+            ResidentTargetCount = payload.ResidentTargetCount,
+            RichlyMaintainedTargetCount = payload.RichlyMaintainedTargetCount,
+            UnprojectableResidentTargetCount = payload.UnprojectableResidentTargetCount,
         };
         if (_subscribedConnection is not { IsConnected: true } connection
             || connection.ConnectionId == Guid.Empty)
@@ -297,8 +298,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         var targets = new List<COGRSpatialVisualizationTarget>();
         foreach (var target in payload.Targets)
         {
-            if (!target.IsTracked
-                || !string.Equals(target.AgentId, payload.AgentId, StringComparison.OrdinalIgnoreCase)
+            if (!string.Equals(target.AgentId, payload.AgentId, StringComparison.OrdinalIgnoreCase)
                 || !TryResolveBodyFrame(
                     connectionId,
                     target.AgentId,
@@ -321,7 +321,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                 AgentId = target.AgentId,
                 TargetId = target.TargetId,
                 TargetRevision = target.TargetRevision,
-                IsTracked = true,
+                IsRichlyMaintained = target.IsRichlyMaintained,
                 IsFocal = target.IsFocal,
                 Belief = beliefCoordinates,
             });
@@ -372,8 +372,9 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         return new COGRSpatialVisualizationMessage
         {
             AgentId = payload.AgentId,
-            TrackedTargetCount = payload.TrackedTargetCount,
-            UnprojectableTrackedTargetCount = payload.UnprojectableTrackedTargetCount,
+            ResidentTargetCount = payload.ResidentTargetCount,
+            RichlyMaintainedTargetCount = payload.RichlyMaintainedTargetCount,
+            UnprojectableResidentTargetCount = payload.UnprojectableResidentTargetCount,
             Targets = targets.ToArray(),
             Paths = paths.ToArray(),
         };
@@ -461,8 +462,9 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         public string AgentId { get; init; } = string.Empty;
         public ulong LatestPathSequence { get; init; }
         public ulong LatestNavigationTraceSequence { get; init; }
-        public int TrackedTargetCount { get; init; }
-        public int UnprojectableTrackedTargetCount { get; init; }
+        public int ResidentTargetCount { get; init; }
+        public int RichlyMaintainedTargetCount { get; init; }
+        public int UnprojectableResidentTargetCount { get; init; }
         public SpatialTargetPayload[] Targets { get; init; } = [];
         public SpatialPathPayload[] Paths { get; init; } = [];
         public NavigationTracePayload[] NavigationTrace { get; init; } = [];
@@ -473,7 +475,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         public string AgentId { get; init; } = string.Empty;
         public string TargetId { get; init; } = string.Empty;
         public ulong TargetRevision { get; init; }
-        public bool IsTracked { get; init; }
+        public bool IsRichlyMaintained { get; init; }
         public bool IsFocal { get; init; }
         public double LocalX { get; init; }
         public double LocalY { get; init; }
