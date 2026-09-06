@@ -11,14 +11,14 @@ public sealed class RequestCOGRSpatialVisualizationMessage : EntityEventArgs
     public string AgentId = string.Empty;
 }
 
-/// <summary>One richly maintained COGR-owned spatial belief projected into Station map coordinates solely for admin visualization.</summary>
+/// <summary>One resident COGR-owned spatial belief projected into Station map coordinates solely for admin visualization.</summary>
 [Serializable, NetSerializable]
 public sealed class COGRSpatialVisualizationTarget
 {
     public string AgentId = string.Empty;
     public string TargetId = string.Empty;
     public ulong TargetRevision;
-    public bool IsTracked;
+    public bool IsRichlyMaintained;
     public bool IsFocal;
     public MapCoordinates Belief;
 }
@@ -36,8 +36,9 @@ public sealed class COGRSpatialVisualizationPath
 public sealed class COGRSpatialVisualizationMessage : EntityEventArgs
 {
     public string AgentId = string.Empty;
-    public int TrackedTargetCount;
-    public int UnprojectableTrackedTargetCount;
+    public int ResidentTargetCount;
+    public int RichlyMaintainedTargetCount;
+    public int UnprojectableResidentTargetCount;
     public COGRSpatialVisualizationTarget[] Targets = [];
     public COGRSpatialVisualizationPath[] Paths = [];
 }
