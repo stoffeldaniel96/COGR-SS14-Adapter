@@ -19,11 +19,14 @@ public sealed partial class COGREmbodimentSupportSystem
 
     /// <summary>
     /// Publishes the initial normalized support sample after the authority coordinator has
-    /// successfully established the exact connection/body/generation lease.
+    /// successfully established the exact connection/body/generation lease. The same authority
+    /// edge also wakes sibling embodiment realizability evidence without adding another controlled-body lifecycle subscriber.
     /// </summary>
     public void NotifyControlledBodyAuthorityBound(EntityUid uid, COGRControlledComponent controlled)
     {
         PublishCurrentSupport(uid, controlled);
+        if (EntityManager.TrySystem<COGRLocomotorRealizabilitySystem>(out var locomotorRealizability))
+            locomotorRealizability.NotifyControlledBodyAuthorityBound(uid, controlled);
     }
 
     /// <summary>
@@ -56,6 +59,8 @@ public sealed partial class COGREmbodimentSupportSystem
             return;
 
         _published.Remove(AgentId.FromGuid(controlled.AgentId));
+        if (EntityManager.TrySystem<COGRLocomotorRealizabilitySystem>(out var locomotorRealizability))
+            locomotorRealizability.NotifyControlledBodyRemoved(controlled);
     }
 
     private void OnControlledMobStateChanged(MobStateChangedEvent args)
