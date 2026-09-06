@@ -23,10 +23,13 @@ public sealed class COGRSpatialVisualizationTarget
     public MapCoordinates Belief;
 
     // Calibration diagnostics are privileged observations only. They never flow back into COGR cognition.
-    public double? PerceivedLocalRange;
+    public bool HasPerceivedLocalRange;
+    public double PerceivedLocalRange;
     public double BeliefVectorMagnitudeLocalUnits;
-    public double? ActualDistanceTiles;
-    public double? ActualDistanceCalibratedLocalUnits;
+    public bool HasActualDistanceTiles;
+    public double ActualDistanceTiles;
+    public bool HasActualDistanceCalibratedLocalUnits;
+    public double ActualDistanceCalibratedLocalUnits;
 }
 
 /// <summary>One transient remembered-route polyline in authoritative map coordinates.</summary>
