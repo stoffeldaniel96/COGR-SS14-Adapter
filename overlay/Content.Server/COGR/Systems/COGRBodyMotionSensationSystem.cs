@@ -25,7 +25,8 @@ namespace Content.Server.COGR.Systems;
 /// SS14 coordinates, exact displacement, exact elapsed time, movement speed, event counts, maps,
 /// grids, routes, and action identity remain adapter-private. A continuous movement interval is
 /// reduced to one departure-body-relative bearing, one saturated sensed-duration band, an optional
-/// quantized body-schema displacement estimate, and coarse reorientation before it enters cognition.
+/// quantized body-schema displacement estimate, coarse reorientation, and bounded simulation-order
+/// provenance before it enters cognition.
 /// </para>
 /// <para>
 /// This is a passive body-sensory path, not a motor-control path. Voluntary movement blockers are
@@ -37,7 +38,9 @@ namespace Content.Server.COGR.Systems;
 /// MoveEvent frequency is never forwarded or counted as distance. Continuous native deltas are
 /// aggregated only inside the adapter, transformed into the departure-body frame, calibrated into
 /// body-schema lengths, quantized, and marked uncertain. Host elapsed time is used only to choose a
-/// bounded psychophysical duration category and to bound sensory publication cadence.
+/// bounded psychophysical duration category and to bound sensory publication cadence. Simulation
+/// ticks cross only as temporal provenance so Runtime can order bodily sensation against visual
+/// evidence without reconstructing a host pose.
 /// </para>
 /// </remarks>
 public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
@@ -48,7 +51,7 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
     private const int DirectionChangeFlushSectors = 2;
     private const int RotationChangeFlushOctants = 2;
 
-    // V2 proprioception is deliberately not an odometer. Native movement is first calibrated to the
+    // V3 proprioception is deliberately not an odometer. Native movement is first calibrated to the
     // same owner-local body scale used by perception/action realization, then quantized before it is
     // allowed across the cognition boundary. One twentieth of a body length preserves useful short-
     // horizon displacement structure without forwarding adapter-native precision.
@@ -131,6 +134,17 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
     }
 
     /// <summary>
+    /// Closes any pending bodily-motion sensation immediately before a visual scene is sampled from
+    /// this observer. This creates an explicit temporal partition: the fresh visual frame supersedes
+    /// every motion interval ending at or before its observation tick, while later bodily motion can
+    /// re-express that frame normally. No visual or spatial truth is fed back into proprioception.
+    /// </summary>
+    public void NotifyVisualSamplingBoundary(EntityUid uid)
+    {
+        FlushPendingMotion(uid, "visual_sampling_boundary");
+    }
+
+    /// <summary>
     /// Consumes one authoritative controlled-body movement event from the regional movement-event
     /// owner. The event remains adapter-private and is reduced to bounded body-relative sensation.
     /// </summary>
@@ -185,6 +199,7 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
         }
 
         var now = _timing.CurTime;
+        var nowTick = new SimTick((ulong)_timing.CurTick.Value);
         if (!_pendingMotion.TryGetValue(uid, out var pending) ||
             pending.Authority != context.Key ||
             pending.Parent != args.OldPosition.EntityId)
@@ -193,7 +208,8 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
                 context.Key,
                 args.OldPosition.EntityId,
                 args.OldRotation,
-                now);
+                now,
+                nowTick);
             _pendingMotion[uid] = pending;
         }
 
@@ -213,7 +229,8 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
                 context.Key,
                 args.OldPosition.EntityId,
                 args.OldRotation,
-                now);
+                now,
+                nowTick);
             _pendingMotion[uid] = pending;
             translated = ProjectIntoDepartureBodyFrame(parentDelta, pending.DepartureRotation);
             instantaneousBearing = QuantizeBearing(translated);
@@ -231,6 +248,7 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
             pending.AccumulatedRotationRadians += rotationDelta;
 
         pending.LastObservedAt = now;
+        pending.LastObservedTick = nowTick;
 
         var rotationOctants = QuantizeRotationOctants(pending.AccumulatedRotationRadians);
         if (Math.Abs(rotationOctants) >= RotationChangeFlushOctants ||
@@ -387,6 +405,8 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
             duration,
             translationEstimate,
             rotationOctants,
+            pending.FirstObservedTick,
+            pending.LastObservedTick,
             reason);
     }
 
@@ -414,6 +434,8 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
             ProprioceptiveMotionDurationBand.None,
             translationEstimate: null,
             rotationOctants: 0,
+            motionStartedAtTick: null,
+            motionEndedAtTick: null,
             reason);
         _continuity[uid] = context.Key;
     }
@@ -425,8 +447,11 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
         ProprioceptiveMotionDurationBand translationDuration,
         ProprioceptiveOwnerFrameTranslationEstimate? translationEstimate,
         int rotationOctants,
+        SimTick? motionStartedAtTick,
+        SimTick? motionEndedAtTick,
         string reason)
     {
+        var emittedAtTick = new SimTick((ulong)_timing.CurTick.Value);
         var evidence = new ProprioceptiveOwnerFrameMotionEvidence
         {
             BodyId = context.BodyId,
@@ -436,13 +461,15 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
             TranslationDuration = translationDuration,
             TranslationEstimate = translationEstimate,
             RotationOctants = rotationOctants,
+            MotionStartedAtTick = motionStartedAtTick,
+            MotionEndedAtTick = motionEndedAtTick,
         };
 
         context.Connection.EnqueueEnvironmentMessage(new PerceptionMessage
         {
             WorldId = context.WorldId,
             ConnectionId = context.ConnectionId,
-            Tick = new SimTick((ulong)_timing.CurTick.Value),
+            Tick = emittedAtTick,
             SourceSequence = SourceSequence.Unassigned,
             LatestAck = default,
             AgentId = context.AgentId,
@@ -455,7 +482,7 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
         if (COGRAdapterTrace.Enabled)
         {
             _sawmill.Info(
-                "[COGR][ProprioceptiveOwnerFrameMotionEmitted] agent={0} body={1} generation={2} baseline={3} bearing={4} duration={5} translation_estimate={6} rotation_octants={7} reason={8}",
+                "[COGR][ProprioceptiveOwnerFrameMotionEmitted] agent={0} body={1} generation={2} baseline={3} bearing={4} duration={5} translation_estimate={6} rotation_octants={7} motion_start_tick={8} motion_end_tick={9} emitted_tick={10} reason={11}",
                 context.AgentId,
                 context.BodyId,
                 context.BodyGeneration,
@@ -464,6 +491,9 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
                 translationDuration,
                 FormatTranslationEstimate(translationEstimate),
                 rotationOctants,
+                motionStartedAtTick?.Value,
+                motionEndedAtTick?.Value,
+                emittedAtTick.Value,
                 reason);
         }
     }
@@ -710,13 +740,16 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
         MotionAuthorityKey authority,
         EntityUid parent,
         Angle departureRotation,
-        TimeSpan firstObservedAt)
+        TimeSpan firstObservedAt,
+        SimTick firstObservedTick)
     {
         public MotionAuthorityKey Authority { get; } = authority;
         public EntityUid Parent { get; } = parent;
         public Angle DepartureRotation { get; } = departureRotation;
         public TimeSpan FirstObservedAt { get; } = firstObservedAt;
         public TimeSpan LastObservedAt { get; set; } = firstObservedAt;
+        public SimTick FirstObservedTick { get; } = firstObservedTick;
+        public SimTick LastObservedTick { get; set; } = firstObservedTick;
         public Vector2 DepartureBodyTranslation { get; set; }
         public double AccumulatedRotationRadians { get; set; }
         public bool HasTranslation { get; set; }
