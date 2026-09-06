@@ -40,43 +40,72 @@ public sealed partial class COGRBoundedPerceptionSystem
         EntityUid target,
         double distance)
     {
+        if (!TryComputeLocalSpatialProjection(
+                observer,
+                target,
+                distance,
+                out var localX,
+                out var localY,
+                out var localDistance))
+        {
+            return;
+        }
+
+        const double localZ = 0.0d;
+        features.Add(ObservedFeature.LocalX(localX, 0.95));
+        features.Add(ObservedFeature.LocalY(localY, 0.95));
+        features.Add(ObservedFeature.LocalZ(localZ, 0.95));
+        features.Add(ObservedFeature.LocalDistance(localDistance, 0.95));
+    }
+
+    /// <summary>
+    /// Computes the exact signed adapter-local spatial components used by perceptual evidence. Keeping the transform in one
+    /// helper prevents privileged diagnostics from silently drifting away from the actual local_x/local_y/local_distance
+    /// values delivered to cognition.
+    /// </summary>
+    private bool TryComputeLocalSpatialProjection(
+        EntityUid observer,
+        EntityUid target,
+        double distance,
+        out double localX,
+        out double localY,
+        out double localDistance)
+    {
+        localX = default;
+        localY = default;
+        localDistance = default;
+
         var observerTransform = Transform(observer);
         var targetTransform = Transform(target);
         var observerCoordinates = observerTransform.Coordinates;
         var targetCoordinates = targetTransform.Coordinates;
         if (observerCoordinates.EntityId != targetCoordinates.EntityId)
-            return;
+            return false;
 
         var delta = targetCoordinates.Position - observerCoordinates.Position;
 
         // Coordinates and LocalRotation share the same parent frame here. Rotate the parent-frame offset back through the
         // observer's local rotation so the transport describes the target relative to the observer's embodied frame rather
         // than a map/cardinal frame. SS14 rotation zero faces local +X, therefore local +X is forward and +Y is left.
-        // Current SS14 geometry is planar, so +Z (up) is explicitly zero rather than omitted from the spatial contract.
         var theta = observerTransform.LocalRotation.Theta;
         var cos = Math.Cos(theta);
         var sin = Math.Sin(theta);
         var actorRelativeNativeX = (delta.X * cos) + (delta.Y * sin);
         var actorRelativeNativeY = (-delta.X * sin) + (delta.Y * cos);
 
-        var localX = QuantizeLocalComponent(
+        localX = QuantizeLocalComponent(
             COGREmbodimentSpatialCalibration.NativeUnitsToLocalUnits(
                 COGREmbodimentSpatialCalibration.GenericHumanoidProfile,
                 actorRelativeNativeX));
-        var localY = QuantizeLocalComponent(
+        localY = QuantizeLocalComponent(
             COGREmbodimentSpatialCalibration.NativeUnitsToLocalUnits(
                 COGREmbodimentSpatialCalibration.GenericHumanoidProfile,
                 actorRelativeNativeY));
-        const double localZ = 0.0d;
-        var localDistance = QuantizeLocalComponent(
+        localDistance = QuantizeLocalComponent(
             COGREmbodimentSpatialCalibration.NativeUnitsToLocalUnits(
                 COGREmbodimentSpatialCalibration.GenericHumanoidProfile,
                 distance));
-
-        features.Add(ObservedFeature.LocalX(localX, 0.95));
-        features.Add(ObservedFeature.LocalY(localY, 0.95));
-        features.Add(ObservedFeature.LocalZ(localZ, 0.95));
-        features.Add(ObservedFeature.LocalDistance(localDistance, 0.95));
+        return true;
     }
 
     private void AddMotionFeature(
