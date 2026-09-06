@@ -36,6 +36,7 @@ public sealed partial class COGRSemanticReplicaSystem : EntitySystem
     private readonly HashSet<SemanticReplicaOwner> _pendingDirtyOwners = new();
     private COGRAdapterSystem _adapter = default!;
     private COGRBodyAuthorityCoordinatorSystem _authority = default!;
+    private COGRBodyMotionSensationSystem _bodyMotion = default!;
     private COGREmbodimentSupportSystem _embodimentSupport = default!;
     private COGRBoundedPerceptionSystem _perception = default!;
     private ISawmill _sawmill = default!;
@@ -47,6 +48,7 @@ public sealed partial class COGRSemanticReplicaSystem : EntitySystem
 
         _adapter = EntityManager.System<COGRAdapterSystem>();
         _authority = EntityManager.System<COGRBodyAuthorityCoordinatorSystem>();
+        _bodyMotion = EntityManager.System<COGRBodyMotionSensationSystem>();
         _embodimentSupport = EntityManager.System<COGREmbodimentSupportSystem>();
         _perception = EntityManager.System<COGRBoundedPerceptionSystem>();
         _sawmill = _logManager.GetSawmill("cogr.replica");
@@ -267,6 +269,12 @@ public sealed partial class COGRSemanticReplicaSystem : EntitySystem
 
             return;
         }
+
+        // Close any adapter-private bodily-motion aggregate before sampling the visual scene. The
+        // proprioceptive message is enqueued first and both observations share authoritative tick
+        // ordering; Runtime can therefore let this fresh scene supersede already-accounted motion
+        // instead of applying the same observer displacement twice.
+        _bodyMotion.NotifyVisualSamplingBoundary(observer.Value);
 
         var tick = new SimTick((ulong)_timing.CurTick.Value);
         var request = CreateProjectionRequest(scope, tick);
