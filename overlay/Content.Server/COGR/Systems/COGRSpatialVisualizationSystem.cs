@@ -402,10 +402,13 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                 IsRichlyMaintained = target.IsRichlyMaintained,
                 IsFocal = target.IsFocal,
                 Belief = beliefCoordinates,
-                PerceivedLocalRange = perceivedLocalRange,
+                HasPerceivedLocalRange = perceivedLocalRange.HasValue,
+                PerceivedLocalRange = perceivedLocalRange.GetValueOrDefault(),
                 BeliefVectorMagnitudeLocalUnits = beliefVectorMagnitudeLocalUnits,
-                ActualDistanceTiles = actualDistanceTiles,
-                ActualDistanceCalibratedLocalUnits = actualDistanceCalibratedLocalUnits,
+                HasActualDistanceTiles = actualDistanceTiles.HasValue,
+                ActualDistanceTiles = actualDistanceTiles.GetValueOrDefault(),
+                HasActualDistanceCalibratedLocalUnits = actualDistanceCalibratedLocalUnits.HasValue,
+                ActualDistanceCalibratedLocalUnits = actualDistanceCalibratedLocalUnits.GetValueOrDefault(),
             });
         }
 
