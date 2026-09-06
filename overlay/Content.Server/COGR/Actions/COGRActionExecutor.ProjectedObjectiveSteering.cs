@@ -39,7 +39,7 @@ public sealed partial class COGRActionExecutor
 
         if (!TryResolvePlanarObjectiveNativeOffset(
                 parameters.ObjectiveOffset,
-                out var ownerRelativeNativeOffset,
+                out _,
                 out var failureDetail))
         {
             return ActionExecutionResult.Failed(
@@ -69,9 +69,15 @@ public sealed partial class COGRActionExecutor
                 "Body has no valid local spatial reference frame");
         }
 
-        var parentOffset = OwnerRelativeObjectiveToParentOffset(ownerRelativeNativeOffset, xform.LocalRotation);
-        if (!float.IsFinite(parentOffset.X)
-            || !float.IsFinite(parentOffset.Y)
+        if (!COGREmbodimentSpatialProjection.TryOwnerRelativeLocalToParentCoordinates(
+                xform.ParentUid,
+                xform.LocalPosition,
+                xform.LocalRotation,
+                parameters.ObjectiveOffset.Forward,
+                parameters.ObjectiveOffset.Left,
+                out var targetCoordinates,
+                out var ownerRelativeNativeOffset,
+                out var parentOffset)
             || parentOffset == Vector2.Zero)
         {
             return ActionExecutionResult.Failed(
@@ -79,14 +85,7 @@ public sealed partial class COGRActionExecutor
                 "Projected body-relative objective has no finite planar Station realization");
         }
 
-        var targetPosition = xform.LocalPosition + parentOffset;
-        if (!float.IsFinite(targetPosition.X) || !float.IsFinite(targetPosition.Y))
-        {
-            return ActionExecutionResult.Failed(
-                ActionFailureReason.TargetLocationInvalidated,
-                "Projected body-relative objective overflowed the current local spatial frame");
-        }
-
+        var targetPosition = targetCoordinates.Position;
         var directDistance = parentOffset.Length();
         var minimumProgress = MathF.Min(
             ProjectedObjectiveMaximumMinimumProgress,
@@ -97,10 +96,9 @@ public sealed partial class COGRActionExecutor
         EnsureComp<MobMoverComponent>(entity.Value);
         EnsureComp<ActiveNPCComponent>(entity.Value);
 
-        // Resolve the cognition-authored egocentric point to one native coordinate exactly once. NPC steering may choose
-        // ordinary local avoidance/path geometry on the way to this coordinate, but Station receives no referent that could
-        // be followed and never refreshes the endpoint from later perception.
-        var targetCoordinates = new EntityCoordinates(xform.ParentUid, targetPosition);
+        // Resolve the cognition-authored egocentric point to one native parent-local coordinate exactly once. NPC steering may
+        // choose ordinary local avoidance/path geometry on the way to this coordinate, but Station receives no referent that
+        // could be followed and never refreshes the endpoint from later perception.
         _npcSteering.Unregister(entity.Value);
         var steering = _npcSteering.Register(entity.Value, targetCoordinates);
         if (!TryResolveProjectedObjectiveArrivalTolerance(steering.Range, out var arrivalTolerance))
@@ -157,12 +155,14 @@ public sealed partial class COGRActionExecutor
         if (COGRAdapterTrace.Enabled)
         {
             _sawmill.Debug(
-                "COGR projected objective: proposal={0} agent={1} bodyOffset=({2:F3},{3:F3},{4:F3}) nativeOffset=({5:F3},{6:F3}) directDistance={7:F3} arrivalRange={8:F3} runRequested={9}",
+                "COGR projected objective: proposal={0} agent={1} bodyOffset=({2:F3},{3:F3},{4:F3}) ownerNative=({5:F3},{6:F3}) parentOffset=({7:F3},{8:F3}) directDistance={9:F3} arrivalRange={10:F3} runRequested={11}",
                 attempt.ProposalId,
                 attempt.AgentId,
                 parameters.ObjectiveOffset.Forward,
                 parameters.ObjectiveOffset.Left,
                 parameters.ObjectiveOffset.Up,
+                ownerRelativeNativeOffset.X,
+                ownerRelativeNativeOffset.Y,
                 parentOffset.X,
                 parentOffset.Y,
                 directDistance,
@@ -377,32 +377,15 @@ public sealed partial class COGRActionExecutor
             return false;
         }
 
-        double nativeForward;
-        double nativeLeft;
-        try
+        if (!COGREmbodimentSpatialProjection.TryOwnerRelativeLocalToNative(
+                objectiveOffset.Forward,
+                objectiveOffset.Left,
+                out ownerRelativeNativeOffset))
         {
-            nativeForward = COGREmbodimentSpatialCalibration.LocalUnitsToNativeUnits(
-                COGREmbodimentSpatialCalibration.GenericHumanoidProfile,
-                objectiveOffset.Forward);
-            nativeLeft = COGREmbodimentSpatialCalibration.LocalUnitsToNativeUnits(
-                COGREmbodimentSpatialCalibration.GenericHumanoidProfile,
-                objectiveOffset.Left);
-        }
-        catch (ArgumentException)
-        {
-            failureDetail = "Projected body-relative steering objective has no valid embodiment calibration";
+            failureDetail = "Projected body-relative steering objective has no finite valid embodiment calibration";
             return false;
         }
 
-        if (!double.IsFinite(nativeForward) || !double.IsFinite(nativeLeft)
-            || nativeForward > float.MaxValue || nativeForward < float.MinValue
-            || nativeLeft > float.MaxValue || nativeLeft < float.MinValue)
-        {
-            failureDetail = "Projected body-relative steering objective exceeds Station's finite planar coordinate range";
-            return false;
-        }
-
-        ownerRelativeNativeOffset = new Vector2((float)nativeForward, (float)nativeLeft);
         var directDistance = ownerRelativeNativeOffset.Length();
         if (!float.IsFinite(directDistance) || directDistance <= 0f)
         {
@@ -435,15 +418,6 @@ public sealed partial class COGRActionExecutor
         && directDistance > 0f
         && arrivalTolerance > 0f
         && directDistance <= arrivalTolerance;
-
-    private static Vector2 OwnerRelativeObjectiveToParentOffset(Vector2 ownerRelativeOffset, Angle localRotation)
-    {
-        var cos = (float)Math.Cos(localRotation.Theta);
-        var sin = (float)Math.Sin(localRotation.Theta);
-        return new Vector2(
-            ownerRelativeOffset.X * cos - ownerRelativeOffset.Y * sin,
-            ownerRelativeOffset.X * sin + ownerRelativeOffset.Y * cos);
-    }
 
     private sealed class ActiveProjectedObjectiveSteering
     {
