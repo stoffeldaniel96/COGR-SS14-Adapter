@@ -59,9 +59,8 @@ public sealed partial class COGRBoundedPerceptionSystem
     }
 
     /// <summary>
-    /// Computes the exact signed adapter-local spatial components used by perceptual evidence. Keeping the transform in one
-    /// helper prevents privileged diagnostics from silently drifting away from the actual local_x/local_y/local_distance
-    /// values delivered to cognition.
+    /// Computes the exact signed adapter-local spatial components used by perceptual evidence through the same paired
+    /// parent-frame/local transform used by projected movement and privileged diagnostics.
     /// </summary>
     private bool TryComputeLocalSpatialProjection(
         EntityUid observer,
@@ -83,29 +82,22 @@ public sealed partial class COGRBoundedPerceptionSystem
             return false;
 
         var delta = targetCoordinates.Position - observerCoordinates.Position;
+        if (!COGREmbodimentSpatialProjection.TryParentOffsetToOwnerRelativeLocal(
+                delta,
+                observerTransform.LocalRotation,
+                out var unquantizedLocalX,
+                out var unquantizedLocalY))
+        {
+            return false;
+        }
 
-        // Coordinates and LocalRotation share the same parent frame here. Rotate the parent-frame offset back through the
-        // observer's local rotation so the transport describes the target relative to the observer's embodied frame rather
-        // than a map/cardinal frame. SS14 rotation zero faces local +X, therefore local +X is forward and +Y is left.
-        var theta = observerTransform.LocalRotation.Theta;
-        var cos = Math.Cos(theta);
-        var sin = Math.Sin(theta);
-        var actorRelativeNativeX = (delta.X * cos) + (delta.Y * sin);
-        var actorRelativeNativeY = (-delta.X * sin) + (delta.Y * cos);
-
-        localX = QuantizeLocalComponent(
-            COGREmbodimentSpatialCalibration.NativeUnitsToLocalUnits(
-                COGREmbodimentSpatialCalibration.GenericHumanoidProfile,
-                actorRelativeNativeX));
-        localY = QuantizeLocalComponent(
-            COGREmbodimentSpatialCalibration.NativeUnitsToLocalUnits(
-                COGREmbodimentSpatialCalibration.GenericHumanoidProfile,
-                actorRelativeNativeY));
+        localX = QuantizeLocalComponent(unquantizedLocalX);
+        localY = QuantizeLocalComponent(unquantizedLocalY);
         localDistance = QuantizeLocalComponent(
             COGREmbodimentSpatialCalibration.NativeUnitsToLocalUnits(
                 COGREmbodimentSpatialCalibration.GenericHumanoidProfile,
                 distance));
-        return true;
+        return double.IsFinite(localDistance);
     }
 
     private void AddMotionFeature(
