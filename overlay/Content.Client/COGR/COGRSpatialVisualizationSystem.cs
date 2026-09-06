@@ -181,13 +181,17 @@ public sealed class COGRSpatialVisualizationOverlay : Overlay
         var handle = args.WorldHandle;
 
         // Blue means a current resident belief-target representation. Red is the Runtime's explicit current perceptual-
-        // attention focus. Rich active maintenance is carried separately in the diagnostic payload and must not determine
-        // whether a resident target is visible. No color uses authoritative target location or movement intent.
+        // attention focus. Cyan is the privileged Station-resolved Coggent body origin and yellow is the privileged current
+        // Station referent position. Cyan/yellow exist solely to audit diagnostic coordinate realization and never feed back
+        // into cognition or action selection.
         foreach (var target in _system.Targets)
         {
-            if (target.Belief.MapId != args.MapId)
-                continue;
-            DrawCross(handle, target.Belief.Position, target.IsFocal ? Color.Red : Color.Blue);
+            if (target.BodyOrigin.MapId == args.MapId)
+                DrawCross(handle, target.BodyOrigin.Position, Color.Cyan);
+            if (target.HasActual && target.Actual.MapId == args.MapId)
+                DrawCross(handle, target.Actual.Position, Color.Yellow);
+            if (target.Belief.MapId == args.MapId)
+                DrawCross(handle, target.Belief.Position, target.IsFocal ? Color.Red : Color.Blue);
         }
 
         foreach (var path in _system.Paths)
