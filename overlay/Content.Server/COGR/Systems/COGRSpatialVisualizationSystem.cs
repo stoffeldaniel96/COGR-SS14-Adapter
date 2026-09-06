@@ -328,6 +328,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         }
 
         var connectionId = ConnectionId.FromGuid(connection.ConnectionId);
+        var currentTick = (ulong)_timing.CurTick.Value;
         var targets = new List<COGRSpatialVisualizationTarget>();
         foreach (var target in payload.Targets)
         {
@@ -339,35 +340,48 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                     out var bodyId,
                     out var bodyGeneration,
                     out var bodyCoordinates,
-                    out var worldRotation)
-                || !TryRealizeLocalPoint(
-                    bodyCoordinates,
-                    worldRotation,
-                    target.LocalX,
-                    target.LocalY,
-                    target.LocalZ,
-                    out var beliefCoordinates))
+                    out var localRotation))
             {
                 continue;
             }
 
+            var bodyMapCoordinates = _transform.ToMapCoordinates(bodyCoordinates);
+            if (bodyMapCoordinates.MapId == MapId.Nullspace
+                || !TryRealizeLocalPoint(
+                    bodyCoordinates,
+                    localRotation,
+                    target.LocalX,
+                    target.LocalY,
+                    target.LocalZ,
+                    out var beliefCoordinates,
+                    out var ownerRelativeNative,
+                    out var parentOffset))
+            {
+                continue;
+            }
+
+            if (beliefCoordinates.MapId != bodyMapCoordinates.MapId)
+                continue;
+
+            var beliefRealizedMapDelta = beliefCoordinates.Position - bodyMapCoordinates.Position;
+            var beliefExpectedDistanceTiles = parentOffset.Length();
+            var beliefRealizedDistanceTiles = beliefRealizedMapDelta.Length();
             var beliefVectorMagnitudeLocalUnits = Math.Sqrt(
                 (target.LocalX * target.LocalX)
                 + (target.LocalY * target.LocalY)
                 + (target.LocalZ * target.LocalZ));
-            double? perceivedLocalRange = null;
+
+            COGRSpatialCalibrationDiagnosticCache.PerceivedSpatialSample? perceivedSample = null;
+            MapCoordinates? actualCoordinates = null;
             double? actualDistanceTiles = null;
             double? actualDistanceCalibratedLocalUnits = null;
+            Vector2? actualMapDelta = null;
 
             if (Guid.TryParse(target.ActualEnvironmentReference, out var environmentGuid)
                 && environmentGuid != Guid.Empty)
             {
                 var environmentReference = EnvironmentRef.FromGuid(environmentGuid);
-                if (COGRSpatialCalibrationDiagnosticCache.TryGet(agentId, environmentReference, out var perceivedSample)
-                    && perceivedSample is not null)
-                {
-                    perceivedLocalRange = perceivedSample.LocalDistance;
-                }
+                COGRSpatialCalibrationDiagnosticCache.TryGet(agentId, environmentReference, out perceivedSample);
 
                 var registry = _adapter.ReferenceRegistry;
                 var actualEntity = registry?.TryResolve(
@@ -375,24 +389,31 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                     new EnvironmentReferenceResolutionContext
                     {
                         ConnectionId = connectionId,
-                        CurrentTick = new SimTick((ulong)_timing.CurTick.Value),
+                        CurrentTick = new SimTick(currentTick),
                         BodyId = bodyId,
                         BodyGeneration = bodyGeneration,
                     });
                 if (actualEntity.HasValue
                     && TryComp(actualEntity.Value, out TransformComponent? actualTransform))
                 {
-                    var actualCoordinates = _transform.GetMapCoordinates(actualEntity.Value, xform: actualTransform);
-                    if (actualCoordinates.MapId != MapId.Nullspace
-                        && actualCoordinates.MapId == bodyCoordinates.MapId)
+                    var resolvedActual = _transform.GetMapCoordinates(actualEntity.Value, xform: actualTransform);
+                    if (resolvedActual.MapId != MapId.Nullspace
+                        && resolvedActual.MapId == bodyMapCoordinates.MapId)
                     {
-                        actualDistanceTiles = Vector2.Distance(bodyCoordinates.Position, actualCoordinates.Position);
+                        actualCoordinates = resolvedActual;
+                        actualMapDelta = resolvedActual.Position - bodyMapCoordinates.Position;
+                        actualDistanceTiles = actualMapDelta.Value.Length();
                         actualDistanceCalibratedLocalUnits = COGREmbodimentSpatialCalibration.NativeUnitsToLocalUnits(
                             COGREmbodimentSpatialCalibration.GenericHumanoidProfile,
                             actualDistanceTiles.Value);
                     }
                 }
             }
+
+            var hasPerceivedSample = perceivedSample is not null;
+            var perceivedSampleAgeTicks = hasPerceivedSample && currentTick >= perceivedSample!.ObservedTick
+                ? currentTick - perceivedSample.ObservedTick
+                : 0UL;
 
             targets.Add(new COGRSpatialVisualizationTarget
             {
@@ -401,14 +422,36 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                 TargetRevision = target.TargetRevision,
                 IsRichlyMaintained = target.IsRichlyMaintained,
                 IsFocal = target.IsFocal,
+                BodyOrigin = bodyMapCoordinates,
                 Belief = beliefCoordinates,
-                HasPerceivedLocalRange = perceivedLocalRange.HasValue,
-                PerceivedLocalRange = perceivedLocalRange.GetValueOrDefault(),
+                HasActual = actualCoordinates.HasValue,
+                Actual = actualCoordinates.GetValueOrDefault(),
+                BeliefLocalX = target.LocalX,
+                BeliefLocalY = target.LocalY,
+                BeliefOwnerRelativeNativeX = ownerRelativeNative.X,
+                BeliefOwnerRelativeNativeY = ownerRelativeNative.Y,
+                BodyLocalRotationRadians = localRotation.Theta,
+                BeliefParentOffsetX = parentOffset.X,
+                BeliefParentOffsetY = parentOffset.Y,
+                BeliefRealizedMapDeltaX = beliefRealizedMapDelta.X,
+                BeliefRealizedMapDeltaY = beliefRealizedMapDelta.Y,
+                BeliefExpectedDistanceTiles = beliefExpectedDistanceTiles,
+                BeliefRealizedDistanceTiles = beliefRealizedDistanceTiles,
+                HasPerceivedLocalRange = hasPerceivedSample,
+                PerceivedLocalRange = perceivedSample?.LocalDistance ?? 0.0,
+                HasPerceivedLocalVector = hasPerceivedSample,
+                PerceivedLocalX = perceivedSample?.LocalX ?? 0.0,
+                PerceivedLocalY = perceivedSample?.LocalY ?? 0.0,
+                PerceivedSampleTick = perceivedSample?.ObservedTick ?? 0UL,
+                PerceivedSampleAgeTicks = perceivedSampleAgeTicks,
                 BeliefVectorMagnitudeLocalUnits = beliefVectorMagnitudeLocalUnits,
                 HasActualDistanceTiles = actualDistanceTiles.HasValue,
                 ActualDistanceTiles = actualDistanceTiles.GetValueOrDefault(),
                 HasActualDistanceCalibratedLocalUnits = actualDistanceCalibratedLocalUnits.HasValue,
                 ActualDistanceCalibratedLocalUnits = actualDistanceCalibratedLocalUnits.GetValueOrDefault(),
+                HasActualMapDelta = actualMapDelta.HasValue,
+                ActualMapDeltaX = actualMapDelta?.X ?? 0.0,
+                ActualMapDeltaY = actualMapDelta?.Y ?? 0.0,
             });
         }
 
@@ -423,7 +466,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                     out _,
                     out _,
                     out var bodyCoordinates,
-                    out var worldRotation))
+                    out var localRotation))
             {
                 continue;
             }
@@ -433,11 +476,13 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
             {
                 if (!TryRealizeLocalPoint(
                         bodyCoordinates,
-                        worldRotation,
+                        localRotation,
                         point.X,
                         point.Y,
                         point.Z,
-                        out var realized))
+                        out var realized,
+                        out _,
+                        out _))
                 {
                     points.Clear();
                     break;
@@ -473,14 +518,14 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         out AgentId agentId,
         out BodyId bodyId,
         out uint bodyGeneration,
-        out MapCoordinates bodyCoordinates,
-        out Angle worldRotation)
+        out EntityCoordinates bodyCoordinates,
+        out Angle localRotation)
     {
         agentId = default;
         bodyId = default;
         bodyGeneration = 0;
         bodyCoordinates = default;
-        worldRotation = default;
+        localRotation = default;
 
         if (!Guid.TryParse(rawAgentId, out var agentGuid) || agentGuid == Guid.Empty)
             return false;
@@ -500,41 +545,54 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         if (!resolvedBody.HasValue || !TryComp(resolvedBody.Value, out TransformComponent? xform))
             return false;
 
-        bodyCoordinates = _transform.GetMapCoordinates(resolvedBody.Value, xform: xform);
-        if (bodyCoordinates.MapId == MapId.Nullspace)
+        bodyCoordinates = xform.Coordinates;
+        if (bodyCoordinates.EntityId == EntityUid.Invalid)
             return false;
-        worldRotation = _transform.GetWorldRotation(xform);
+
+        var bodyMapCoordinates = _transform.ToMapCoordinates(bodyCoordinates);
+        if (bodyMapCoordinates.MapId == MapId.Nullspace)
+            return false;
+
+        localRotation = xform.LocalRotation;
         return true;
     }
 
-    private static bool TryRealizeLocalPoint(
-        MapCoordinates origin,
-        Angle worldRotation,
+    private bool TryRealizeLocalPoint(
+        EntityCoordinates origin,
+        Angle localRotation,
         double localX,
         double localY,
         double localZ,
-        out MapCoordinates realized)
+        out MapCoordinates realized,
+        out Vector2 ownerRelativeNative,
+        out Vector2 parentOffset)
     {
         realized = default;
-        if (!double.IsFinite(localX) || !double.IsFinite(localY) || !double.IsFinite(localZ))
+        ownerRelativeNative = Vector2.Zero;
+        parentOffset = Vector2.Zero;
+        if (!double.IsFinite(localX)
+            || !double.IsFinite(localY)
+            || !double.IsFinite(localZ)
+            || localZ != 0.0)
+        {
             return false;
+        }
 
-        var nativeX = COGREmbodimentSpatialCalibration.LocalUnitsToNativeUnits(
-            COGREmbodimentSpatialCalibration.GenericHumanoidProfile,
-            localX);
-        var nativeY = COGREmbodimentSpatialCalibration.LocalUnitsToNativeUnits(
-            COGREmbodimentSpatialCalibration.GenericHumanoidProfile,
-            localY);
-        if (!double.IsFinite(nativeX) || !double.IsFinite(nativeY))
+        if (!COGREmbodimentSpatialProjection.TryOwnerRelativeLocalToParentCoordinates(
+                origin.EntityId,
+                origin.Position,
+                localRotation,
+                localX,
+                localY,
+                out var endpoint,
+                out ownerRelativeNative,
+                out parentOffset))
+        {
             return false;
+        }
 
-        var cos = Math.Cos(worldRotation.Theta);
-        var sin = Math.Sin(worldRotation.Theta);
-        var offset = new Vector2(
-            (float)((nativeX * cos) - (nativeY * sin)),
-            (float)((nativeX * sin) + (nativeY * cos)));
-        realized = new MapCoordinates(origin.Position + offset, origin.MapId);
-        return true;
+        realized = _transform.ToMapCoordinates(endpoint);
+        return realized.MapId != MapId.Nullspace;
     }
 
     private void ClearDiagnosticState()
