@@ -450,8 +450,8 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                 HasActualDistanceCalibratedLocalUnits = actualDistanceCalibratedLocalUnits.HasValue,
                 ActualDistanceCalibratedLocalUnits = actualDistanceCalibratedLocalUnits.GetValueOrDefault(),
                 HasActualMapDelta = actualMapDelta.HasValue,
-                ActualMapDeltaX = actualMapDelta?.X ?? 0.0,
-                ActualMapDeltaY = actualMapDelta?.Y ?? 0.0,
+                ActualMapDeltaX = actualMapDelta?.X ?? 0f,
+                ActualMapDeltaY = actualMapDelta?.Y ?? 0f,
             });
         }
 
