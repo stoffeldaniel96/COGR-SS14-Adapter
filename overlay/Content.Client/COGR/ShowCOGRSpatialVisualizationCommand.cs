@@ -29,21 +29,23 @@ public sealed partial class ShowCOGRSpatialVisualizationCommand : LocalizedEntit
                              .ThenByDescending(static target => target.IsRichlyMaintained)
                              .ThenBy(static target => target.TargetId, StringComparer.Ordinal))
                 {
-                    var beliefMinusPerceived = target.PerceivedLocalRange.HasValue
-                        ? target.BeliefVectorMagnitudeLocalUnits - target.PerceivedLocalRange.Value
-                        : (double?)null;
-                    var perceivedMinusActual = target.PerceivedLocalRange.HasValue
-                                                && target.ActualDistanceCalibratedLocalUnits.HasValue
-                        ? target.PerceivedLocalRange.Value - target.ActualDistanceCalibratedLocalUnits.Value
-                        : (double?)null;
+                    var hasBeliefMinusPerceived = target.HasPerceivedLocalRange;
+                    var beliefMinusPerceived = hasBeliefMinusPerceived
+                        ? target.BeliefVectorMagnitudeLocalUnits - target.PerceivedLocalRange
+                        : 0.0;
+                    var hasPerceivedMinusActual = target.HasPerceivedLocalRange
+                                                 && target.HasActualDistanceCalibratedLocalUnits;
+                    var perceivedMinusActual = hasPerceivedMinusActual
+                        ? target.PerceivedLocalRange - target.ActualDistanceCalibratedLocalUnits
+                        : 0.0;
                     shell.WriteLine(
                         $"  target={target.TargetId} rev={target.TargetRevision} focal={target.IsFocal} rich={target.IsRichlyMaintained} "
-                        + $"perceivedLocal={Format(target.PerceivedLocalRange)} "
+                        + $"perceivedLocal={Format(target.HasPerceivedLocalRange, target.PerceivedLocalRange)} "
                         + $"belief|v|Local={target.BeliefVectorMagnitudeLocalUnits:F4} "
-                        + $"actualTiles={Format(target.ActualDistanceTiles)} "
-                        + $"actualCalibratedLocal={Format(target.ActualDistanceCalibratedLocalUnits)} "
-                        + $"belief-perceived={Format(beliefMinusPerceived)} "
-                        + $"perceived-actual={Format(perceivedMinusActual)}");
+                        + $"actualTiles={Format(target.HasActualDistanceTiles, target.ActualDistanceTiles)} "
+                        + $"actualCalibratedLocal={Format(target.HasActualDistanceCalibratedLocalUnits, target.ActualDistanceCalibratedLocalUnits)} "
+                        + $"belief-perceived={Format(hasBeliefMinusPerceived, beliefMinusPerceived)} "
+                        + $"perceived-actual={Format(hasPerceivedMinusActual, perceivedMinusActual)}");
                 }
             }
             return;
@@ -70,5 +72,5 @@ public sealed partial class ShowCOGRSpatialVisualizationCommand : LocalizedEntit
         shell.WriteLine("Run 'showcogrspatial' with no argument to inspect counts and the per-target calibration tuple.");
     }
 
-    private static string Format(double? value) => value.HasValue ? value.Value.ToString("F4") : "n/a";
+    private static string Format(bool hasValue, double value) => hasValue ? value.ToString("F4") : "n/a";
 }
