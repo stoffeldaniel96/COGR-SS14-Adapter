@@ -83,6 +83,21 @@ public sealed class COGRProjectedObjectiveSteeringTests
         Assert.That(accepted, Is.False);
     }
 
+    [TestCase(0.10f, 0.20f, true)]
+    [TestCase(0.20f, 0.20f, true)]
+    [TestCase(0.21f, 0.20f, false)]
+    public void ProjectedObjectiveWithinNativeArrivalRange_IsImmediateSuccessfulNoOp(
+        float directDistance,
+        float arrivalTolerance,
+        bool expected)
+    {
+        var check = RequireStaticMethod("IsProjectedObjectiveAlreadyWithinArrivalTolerance");
+
+        var result = (bool)check.Invoke(null, [directDistance, arrivalTolerance])!;
+
+        Assert.That(result, Is.EqualTo(expected));
+    }
+
     [Test]
     public void VerticalObjective_FailsClosedInsteadOfDroppingUpComponent()
     {
