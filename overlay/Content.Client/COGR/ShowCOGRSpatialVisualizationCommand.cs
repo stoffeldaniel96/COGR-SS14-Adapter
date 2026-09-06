@@ -22,6 +22,29 @@ public sealed partial class ShowCOGRSpatialVisualizationCommand : LocalizedEntit
                     + $"world-space markers: {_visualization.ProjectedResidentTargetCount}; "
                     + $"unprojectable in current owner frame: {_visualization.UnprojectableResidentTargetCount}; "
                     + $"rich active maintenance: {_visualization.RichlyMaintainedTargetCount}.");
+                shell.WriteLine("Calibration: perceivedLocal | belief|v|Local | actualTiles | actualCalibratedLocal (adapter body calibration).");
+
+                foreach (var target in _visualization.Targets
+                             .OrderByDescending(static target => target.IsFocal)
+                             .ThenByDescending(static target => target.IsRichlyMaintained)
+                             .ThenBy(static target => target.TargetId, StringComparer.Ordinal))
+                {
+                    var beliefMinusPerceived = target.PerceivedLocalRange.HasValue
+                        ? target.BeliefVectorMagnitudeLocalUnits - target.PerceivedLocalRange.Value
+                        : (double?)null;
+                    var perceivedMinusActual = target.PerceivedLocalRange.HasValue
+                                                && target.ActualDistanceCalibratedLocalUnits.HasValue
+                        ? target.PerceivedLocalRange.Value - target.ActualDistanceCalibratedLocalUnits.Value
+                        : (double?)null;
+                    shell.WriteLine(
+                        $"  target={target.TargetId} rev={target.TargetRevision} focal={target.IsFocal} rich={target.IsRichlyMaintained} "
+                        + $"perceivedLocal={Format(target.PerceivedLocalRange)} "
+                        + $"belief|v|Local={target.BeliefVectorMagnitudeLocalUnits:F4} "
+                        + $"actualTiles={Format(target.ActualDistanceTiles)} "
+                        + $"actualCalibratedLocal={Format(target.ActualDistanceCalibratedLocalUnits)} "
+                        + $"belief-perceived={Format(beliefMinusPerceived)} "
+                        + $"perceived-actual={Format(perceivedMinusActual)}");
+                }
             }
             return;
         }
@@ -44,6 +67,8 @@ public sealed partial class ShowCOGRSpatialVisualizationCommand : LocalizedEntit
         shell.WriteLine($"COGR spatial visualization tracking {agentId}.");
         shell.WriteLine("Resident spatial belief targets render blue; the explicit perceptual-attention focus renders red.");
         shell.WriteLine("Markers retire only when a successful Runtime full frame no longer reports that resident target.");
-        shell.WriteLine("Run 'showcogrspatial' with no argument to inspect resident, projected, unprojectable, and rich-maintenance counts.");
+        shell.WriteLine("Run 'showcogrspatial' with no argument to inspect counts and the per-target calibration tuple.");
     }
+
+    private static string Format(double? value) => value.HasValue ? value.Value.ToString("F4") : "n/a";
 }
