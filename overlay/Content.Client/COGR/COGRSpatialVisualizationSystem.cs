@@ -20,9 +20,14 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
     private readonly Dictionary<string, TimedTarget> _targets = new(StringComparer.Ordinal);
     private readonly Dictionary<ulong, TimedPath> _paths = [];
     private string? _trackedAgentId;
+    private int _trackedTargetCount;
+    private int _unprojectableTrackedTargetCount;
 
     public bool Enabled => _trackedAgentId is not null;
     public string? TrackedAgentId => _trackedAgentId;
+    public int TrackedTargetCount => _trackedTargetCount;
+    public int UnprojectableTrackedTargetCount => _unprojectableTrackedTargetCount;
+    public int ProjectedTrackedTargetCount => _targets.Count;
 
     internal Dictionary<string, TimedTarget>.ValueCollection Targets => _targets.Values;
     internal Dictionary<ulong, TimedPath>.ValueCollection Paths => _paths.Values;
@@ -111,11 +116,18 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
             return;
         }
 
+        _trackedTargetCount = Math.Max(0, message.TrackedTargetCount);
+        _unprojectableTrackedTargetCount = Math.Clamp(
+            message.UnprojectableTrackedTargetCount,
+            0,
+            _trackedTargetCount);
+
         var now = _timing.RealTime;
         var currentKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var target in message.Targets)
         {
-            if (!string.Equals(target.AgentId, _trackedAgentId, StringComparison.OrdinalIgnoreCase)
+            if (!target.IsTracked
+                || !string.Equals(target.AgentId, _trackedAgentId, StringComparison.OrdinalIgnoreCase)
                 || string.IsNullOrWhiteSpace(target.TargetId))
             {
                 continue;
@@ -141,13 +153,15 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
     {
         _targets.Clear();
         _paths.Clear();
+        _trackedTargetCount = 0;
+        _unprojectableTrackedTargetCount = 0;
     }
 
     internal sealed record TimedTarget(COGRSpatialVisualizationTarget Target, TimeSpan ExpiresAt);
     internal sealed record TimedPath(MapCoordinates[] Points, TimeSpan ExpiresAt);
 }
 
-/// <summary>World-space renderer for cognition-owned belief positions and remembered-route diagnostics.</summary>
+/// <summary>World-space renderer for cognition-owned tracked belief positions and remembered-route diagnostics.</summary>
 public sealed class COGRSpatialVisualizationOverlay : Overlay
 {
     private const float EndpointMarkerRadius = 0.09f;
@@ -164,15 +178,15 @@ public sealed class COGRSpatialVisualizationOverlay : Overlay
     {
         var handle = args.WorldHandle;
 
-        // Blue is deliberately reserved for COGR's own reported spatial belief. No authoritative target location is drawn
-        // in this normal acceptance-testing view, so a cognitive spatial error remains visible instead of being repaired or
-        // visually conflated with Station truth.
+        // Blue means rich active belief-target maintenance. Red is the Runtime's explicit current perceptual-attention
+        // focus among those tracked targets. Neither color uses authoritative target location or movement intent, so spatial
+        // belief error remains visible instead of being repaired or conflated with Station truth.
         foreach (var timed in _system.Targets)
         {
             var target = timed.Target;
-            if (target.Belief.MapId != args.MapId)
+            if (!target.IsTracked || target.Belief.MapId != args.MapId)
                 continue;
-            DrawCross(handle, target.Belief.Position, Color.Blue);
+            DrawCross(handle, target.Belief.Position, target.IsFocal ? Color.Red : Color.Blue);
         }
 
         foreach (var path in _system.Paths)
