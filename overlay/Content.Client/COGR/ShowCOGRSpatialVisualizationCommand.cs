@@ -1,3 +1,4 @@
+using System.Linq;
 using Robust.Shared.Console;
 
 namespace Content.Client.COGR;
