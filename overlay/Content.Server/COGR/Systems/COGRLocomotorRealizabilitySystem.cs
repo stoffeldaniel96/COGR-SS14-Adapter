@@ -6,6 +6,7 @@ using COGR.Core.Perception;
 using COGR.Core.Sequences;
 using COGR.Core.Time;
 using COGR.Transport.Grpc.Mapping;
+using Content.Server.COGR;
 using Content.Server.NPC.Components;
 using Content.Shared.COGR.Components;
 using Robust.Shared.Log;
