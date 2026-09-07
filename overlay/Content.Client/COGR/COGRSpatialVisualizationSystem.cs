@@ -59,13 +59,11 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
 
         var canonical = parsed.ToString("D");
         var selectedTargetId = string.IsNullOrWhiteSpace(targetId) ? null : targetId.Trim();
-        if (string.Equals(_trackedAgentId, canonical, StringComparison.Ordinal)
-            && string.Equals(_trackedTargetId, selectedTargetId, StringComparison.Ordinal))
-        {
+        var sameAgent = string.Equals(_trackedAgentId, canonical, StringComparison.Ordinal);
+        if (sameAgent && string.Equals(_trackedTargetId, selectedTargetId, StringComparison.Ordinal))
             return;
-        }
 
-        if (_trackedAgentId is not null)
+        if (_trackedAgentId is not null && !sameAgent)
         {
             RaiseNetworkEvent(new RequestCOGRSpatialVisualizationMessage
             {
@@ -77,9 +75,12 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
 
         _trackedAgentId = canonical;
         _trackedTargetId = selectedTargetId;
-        Clear();
-        if (!_overlayManager.HasOverlay<COGRSpatialVisualizationOverlay>())
-            _overlayManager.AddOverlay(new COGRSpatialVisualizationOverlay(this));
+        if (!sameAgent)
+        {
+            Clear();
+            if (!_overlayManager.HasOverlay<COGRSpatialVisualizationOverlay>())
+                _overlayManager.AddOverlay(new COGRSpatialVisualizationOverlay(this));
+        }
 
         RaiseNetworkEvent(new RequestCOGRSpatialVisualizationMessage
         {
