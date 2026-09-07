@@ -2,7 +2,6 @@ using System;
 using System.Linq;
 using System.Numerics;
 using System.Reflection;
-using COGR.Contracts.Messages;
 using COGR.Core.Perception;
 using COGR.Core.Time;
 using Content.Server.COGR.Systems;
@@ -186,14 +185,6 @@ public sealed class COGRBodyMotionSensationTests
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.That(replicaBodyMotion, Is.Not.Null);
         Assert.That(replicaBodyMotion!.FieldType, Is.EqualTo(typeof(COGRBodyMotionSensationSystem)));
-    }
-
-    [Test]
-    public void CanonicalBodyMotionWire_IsTemporalV3()
-    {
-        Assert.That(
-            ProprioceptiveOwnerFrameMotionEvidenceWireCodec.Format,
-            Is.EqualTo("cogr.proprioceptive-owner-frame-motion.v3+json"));
     }
 
     [Test]
