@@ -31,6 +31,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
     [Dependency] private SharedTransformSystem _transform = default!;
 
     private readonly Dictionary<ICommonSession, string> _subscriberAgents = [];
+    private readonly Dictionary<ICommonSession, string> _subscriberTargetIds = [];
     private readonly Dictionary<string, ulong> _latestPathSequenceByAgent = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ulong> _latestNavigationTraceSequenceByAgent = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ulong> _latestFocusTraceSequenceByAgent = new(StringComparer.OrdinalIgnoreCase);
@@ -39,6 +40,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
     private COGRBodyAuthorityCoordinatorSystem _authority = default!;
     private ISawmill _traceSawmill = default!;
     private ISawmill _focusSawmill = default!;
+    private ISawmill _spatialTraceSawmill = default!;
     private COGRConnectionManager? _subscribedConnection;
     private Guid? _pendingPollCorrelation;
     private string? _pendingPollAgentId;
@@ -52,6 +54,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         _authority = EntityManager.System<COGRBodyAuthorityCoordinatorSystem>();
         _traceSawmill = _logManager.GetSawmill("cogr.navtrace");
         _focusSawmill = _logManager.GetSawmill("cogr.focus");
+        _spatialTraceSawmill = _logManager.GetSawmill("cogr.spatialtrace");
         SubscribeNetworkEvent<RequestCOGRSpatialVisualizationMessage>(OnSubscriptionRequest);
     }
 
@@ -60,6 +63,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         DisableAllRuntimeObservers();
         AttachConnection(null);
         _subscriberAgents.Clear();
+        _subscriberTargetIds.Clear();
         ClearDiagnosticState();
         base.Shutdown();
     }
@@ -114,6 +118,9 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         {
             _subscriberAgents.TryGetValue(session, out var previousAgentId);
             _subscriberAgents[session] = agentId;
+            _subscriberTargetIds[session] = string.IsNullOrWhiteSpace(message.TargetId)
+                ? string.Empty
+                : message.TargetId.Trim();
             COGRSpatialCalibrationDiagnosticCache.SetEnabled(AgentId.FromGuid(agentGuid), true);
             _lastPollTick = 0;
             if (previousAgentId is not null
@@ -128,6 +135,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
             && string.Equals(selected, agentId, StringComparison.OrdinalIgnoreCase))
         {
             _subscriberAgents.Remove(session);
+            _subscriberTargetIds.Remove(session);
             DisableIfUnobserved(selected);
         }
     }
@@ -135,7 +143,12 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
     private void RemoveSubscriber(ICommonSession session)
     {
         if (!_subscriberAgents.Remove(session, out var agentId))
+        {
+            _subscriberTargetIds.Remove(session);
             return;
+        }
+
+        _subscriberTargetIds.Remove(session);
         DisableIfUnobserved(agentId);
     }
 
@@ -294,7 +307,20 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                 trace.Reason);
         }
 
-        var message = ResolvePayload(payload);
+        var tracedTargetIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var subscriber in _subscriberAgents)
+        {
+            if (!string.Equals(subscriber.Value, requestedAgentId, StringComparison.OrdinalIgnoreCase)
+                || !_subscriberTargetIds.TryGetValue(subscriber.Key, out var targetId)
+                || string.IsNullOrWhiteSpace(targetId))
+            {
+                continue;
+            }
+
+            tracedTargetIds.Add(targetId);
+        }
+
+        var message = ResolvePayload(payload, tracedTargetIds);
         foreach (var subscriber in _subscriberAgents
                      .Where(pair => string.Equals(pair.Value, requestedAgentId, StringComparison.OrdinalIgnoreCase))
                      .Select(static pair => pair.Key)
@@ -312,7 +338,9 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         }
     }
 
-    private COGRSpatialVisualizationMessage ResolvePayload(SpatialPollPayload payload)
+    private COGRSpatialVisualizationMessage ResolvePayload(
+        SpatialPollPayload payload,
+        HashSet<string> tracedTargetIds)
     {
         var empty = new COGRSpatialVisualizationMessage
         {
@@ -330,10 +358,32 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         var connectionId = ConnectionId.FromGuid(connection.ConnectionId);
         var currentTick = (ulong)_timing.CurTick.Value;
         var targets = new List<COGRSpatialVisualizationTarget>();
+        var tracedTargetsSeen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var target in payload.Targets)
         {
-            if (!string.Equals(target.AgentId, payload.AgentId, StringComparison.OrdinalIgnoreCase)
-                || !TryResolveBodyFrame(
+            var isTracedTarget = tracedTargetIds.Contains(target.TargetId);
+            if (isTracedTarget)
+                tracedTargetsSeen.Add(target.TargetId);
+
+            if (!string.Equals(target.AgentId, payload.AgentId, StringComparison.OrdinalIgnoreCase))
+            {
+                if (isTracedTarget)
+                {
+                    _spatialTraceSawmill.Info(
+                        "tick={0} agent={1} target={2} rev={3} runtimeLocal=({4:F4},{5:F4}) station=agent-mismatch resident={6} unprojectable={7}",
+                        currentTick,
+                        payload.AgentId,
+                        target.TargetId,
+                        target.TargetRevision,
+                        target.LocalX,
+                        target.LocalY,
+                        payload.ResidentTargetCount,
+                        payload.UnprojectableResidentTargetCount);
+                }
+                continue;
+            }
+
+            if (!TryResolveBodyFrame(
                     connectionId,
                     target.AgentId,
                     out var agentId,
@@ -342,12 +392,46 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                     out var bodyCoordinates,
                     out var localRotation))
             {
+                if (isTracedTarget)
+                {
+                    _spatialTraceSawmill.Info(
+                        "tick={0} agent={1} target={2} rev={3} focal={4} rich={5} runtimeLocal=({6:F4},{7:F4}) station=body-frame-unresolved resident={8} unprojectable={9}",
+                        currentTick,
+                        payload.AgentId,
+                        target.TargetId,
+                        target.TargetRevision,
+                        target.IsFocal,
+                        target.IsRichlyMaintained,
+                        target.LocalX,
+                        target.LocalY,
+                        payload.ResidentTargetCount,
+                        payload.UnprojectableResidentTargetCount);
+                }
                 continue;
             }
 
             var bodyMapCoordinates = _transform.ToMapCoordinates(bodyCoordinates);
-            if (bodyMapCoordinates.MapId == MapId.Nullspace
-                || !TryRealizeLocalPoint(
+            if (bodyMapCoordinates.MapId == MapId.Nullspace)
+            {
+                if (isTracedTarget)
+                {
+                    _spatialTraceSawmill.Info(
+                        "tick={0} agent={1} target={2} rev={3} focal={4} rich={5} runtimeLocal=({6:F4},{7:F4}) station=body-nullspace resident={8} unprojectable={9}",
+                        currentTick,
+                        payload.AgentId,
+                        target.TargetId,
+                        target.TargetRevision,
+                        target.IsFocal,
+                        target.IsRichlyMaintained,
+                        target.LocalX,
+                        target.LocalY,
+                        payload.ResidentTargetCount,
+                        payload.UnprojectableResidentTargetCount);
+                }
+                continue;
+            }
+
+            if (!TryRealizeLocalPoint(
                     bodyCoordinates,
                     localRotation,
                     target.LocalX,
@@ -357,11 +441,49 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                     out var ownerRelativeNative,
                     out var parentOffset))
             {
+                if (isTracedTarget)
+                {
+                    _spatialTraceSawmill.Info(
+                        "tick={0} agent={1} target={2} rev={3} focal={4} rich={5} runtimeLocal=({6:F4},{7:F4}) bodyMap=({8:F4},{9:F4}) bodyLocalRot={10:F4} station=local-realization-failed resident={11} unprojectable={12}",
+                        currentTick,
+                        payload.AgentId,
+                        target.TargetId,
+                        target.TargetRevision,
+                        target.IsFocal,
+                        target.IsRichlyMaintained,
+                        target.LocalX,
+                        target.LocalY,
+                        bodyMapCoordinates.Position.X,
+                        bodyMapCoordinates.Position.Y,
+                        localRotation.Theta,
+                        payload.ResidentTargetCount,
+                        payload.UnprojectableResidentTargetCount);
+                }
                 continue;
             }
 
             if (beliefCoordinates.MapId != bodyMapCoordinates.MapId)
+            {
+                if (isTracedTarget)
+                {
+                    _spatialTraceSawmill.Info(
+                        "tick={0} agent={1} target={2} rev={3} focal={4} rich={5} runtimeLocal=({6:F4},{7:F4}) bodyMap=({8:F4},{9:F4}) bodyLocalRot={10:F4} station=map-mismatch resident={11} unprojectable={12}",
+                        currentTick,
+                        payload.AgentId,
+                        target.TargetId,
+                        target.TargetRevision,
+                        target.IsFocal,
+                        target.IsRichlyMaintained,
+                        target.LocalX,
+                        target.LocalY,
+                        bodyMapCoordinates.Position.X,
+                        bodyMapCoordinates.Position.Y,
+                        localRotation.Theta,
+                        payload.ResidentTargetCount,
+                        payload.UnprojectableResidentTargetCount);
+                }
                 continue;
+            }
 
             var beliefRealizedMapDelta = beliefCoordinates.Position - bodyMapCoordinates.Position;
             var beliefExpectedDistanceTiles = parentOffset.Length();
@@ -415,6 +537,29 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                 ? currentTick - perceivedSample.ObservedTick
                 : 0UL;
 
+            if (isTracedTarget)
+            {
+                _spatialTraceSawmill.Info(
+                    "tick={0} agent={1} target={2} rev={3} focal={4} rich={5} runtimeLocal=({6:F4},{7:F4}) bodyMap=({8:F4},{9:F4}) bodyLocalRot={10:F4} beliefMap=({11:F4},{12:F4}) realizedMapDelta=({13:F4},{14:F4}) resident={15} unprojectable={16}",
+                    currentTick,
+                    payload.AgentId,
+                    target.TargetId,
+                    target.TargetRevision,
+                    target.IsFocal,
+                    target.IsRichlyMaintained,
+                    target.LocalX,
+                    target.LocalY,
+                    bodyMapCoordinates.Position.X,
+                    bodyMapCoordinates.Position.Y,
+                    localRotation.Theta,
+                    beliefCoordinates.Position.X,
+                    beliefCoordinates.Position.Y,
+                    beliefRealizedMapDelta.X,
+                    beliefRealizedMapDelta.Y,
+                    payload.ResidentTargetCount,
+                    payload.UnprojectableResidentTargetCount);
+            }
+
             targets.Add(new COGRSpatialVisualizationTarget
             {
                 AgentId = target.AgentId,
@@ -453,6 +598,19 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                 ActualMapDeltaX = actualMapDelta?.X ?? 0f,
                 ActualMapDeltaY = actualMapDelta?.Y ?? 0f,
             });
+        }
+
+        foreach (var targetId in tracedTargetIds
+                     .Where(targetId => !tracedTargetsSeen.Contains(targetId))
+                     .OrderBy(static targetId => targetId, StringComparer.Ordinal))
+        {
+            _spatialTraceSawmill.Info(
+                "tick={0} agent={1} target={2} runtimeTarget=absent resident={3} unprojectable={4}",
+                currentTick,
+                payload.AgentId,
+                targetId,
+                payload.ResidentTargetCount,
+                payload.UnprojectableResidentTargetCount);
         }
 
         var paths = new List<COGRSpatialVisualizationPath>();
