@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using COGR.Core.Identifiers;
 using COGR.Core.Perception;
+using COGR.Core.Time;
 using Content.Shared.Hands.Components;
 
 namespace Content.Server.COGR.Systems;
@@ -108,10 +109,20 @@ public sealed partial class COGRBoundedPerceptionSystem
         if (_containers.IsEntityOrParentInContainer(semanticSource))
             return false;
 
-        if (!Transform(observer).Coordinates.TryDistance(
-                EntityManager,
-                Transform(semanticSource).Coordinates,
-                out var distance)
+        // Passive visual fingerprinting is still visual transduction even though it emits only an
+        // adapter-private change cue. Capture the physical egocentric origin once and use that same
+        // immutable frame for every spatial feature participating in this fingerprint. Do not fall
+        // back to re-reading Transform(observer) independently for individual features.
+        var currentTick = new SimTick((ulong)_timing.CurTick.Value);
+        if (!TryCaptureEgocentricSensoryFrame(observer, currentTick, out var sensoryFrame))
+            return false;
+
+        var semanticCoordinates = Transform(semanticSource).Coordinates;
+        if (!sensoryFrame.TryGetParentOffset(semanticCoordinates, out var parentOffset))
+            return false;
+
+        var distance = parentOffset.Length();
+        if (!float.IsFinite(distance)
             || distance > observedRange
             || !TryCreateCandidate(semanticSource, distance, hints: null, out var candidate))
         {
@@ -120,7 +131,7 @@ public sealed partial class COGRBoundedPerceptionSystem
 
         var builder = new StringBuilder();
         AppendFingerprintToken(builder, candidate.Category);
-        AppendFeatureFingerprint(builder, CreateFeatures(observer, candidate));
+        AppendFeatureFingerprint(builder, CreateFeatures(sensoryFrame, candidate));
 
         // Focused actor projection exposes stable hand subreferents and, when Station renders hand contents externally,
         // hold relations plus the held entities themselves. Include exactly that externally visible relational surface so
@@ -152,7 +163,7 @@ public sealed partial class COGRBoundedPerceptionSystem
                 AppendFingerprintToken(builder, handId);
                 AppendFingerprintToken(builder, heldEntity.ToString());
                 AppendFingerprintToken(builder, heldCandidate.Category);
-                AppendFeatureFingerprint(builder, CreateFeatures(observer, heldCandidate));
+                AppendFeatureFingerprint(builder, CreateFeatures(sensoryFrame, heldCandidate));
             }
         }
 
