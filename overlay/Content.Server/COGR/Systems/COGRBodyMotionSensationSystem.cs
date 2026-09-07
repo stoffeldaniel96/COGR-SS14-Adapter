@@ -17,16 +17,16 @@ using Robust.Shared.Timing;
 namespace Content.Server.COGR.Systems;
 
 /// <summary>
-/// Transduces authoritative SS14 body motion into bounded, fallible vestibular/kinesthetic
-/// evidence for COGR-controlled bodies.
+/// Transduces authoritative SS14 body motion into bounded vestibular/kinesthetic evidence for
+/// COGR-controlled bodies.
 /// </summary>
 /// <remarks>
 /// <para>
-/// SS14 coordinates, exact displacement, exact elapsed time, movement speed, event counts, maps,
-/// grids, routes, and action identity remain adapter-private. A continuous movement interval is
-/// reduced to one departure-body-relative bearing, one saturated sensed-duration band, an optional
-/// quantized body-schema displacement estimate, coarse reorientation, and bounded simulation-order
-/// provenance before it enters cognition.
+/// SS14 coordinates, native elapsed time, movement speed, event counts, maps, grids, routes, and
+/// action identity remain adapter-private. A continuous movement interval is reduced to one
+/// departure-body-relative bearing, one saturated duration band, one calibrated body-schema
+/// displacement estimate when translation is present, coarse reorientation, and bounded
+/// simulation-order provenance before it enters cognition.
 /// </para>
 /// <para>
 /// This is a passive body-sensory path, not a motor-control path. Voluntary movement blockers are
@@ -36,11 +36,13 @@ namespace Content.Server.COGR.Systems;
 /// </para>
 /// <para>
 /// MoveEvent frequency is never forwarded or counted as distance. Continuous native deltas are
-/// aggregated only inside the adapter, transformed into the departure-body frame, calibrated into
-/// body-schema lengths, quantized, and marked uncertain. Host elapsed time is used only to choose a
-/// bounded psychophysical duration category and to bound sensory publication cadence. Simulation
-/// ticks cross only as temporal provenance so Runtime can order bodily sensation against visual
-/// evidence without reconstructing a host pose.
+/// aggregated only inside the adapter, transformed into the departure-body frame, and calibrated
+/// into the same body-schema local units used by visual spatial projection. The rich displacement
+/// channel carries that transform-derived geometry without adapter-invented uncertainty; Runtime
+/// cognition owns interpretation and cognitive fallibility. Host elapsed time is used only to
+/// choose a bounded qualitative duration category and to bound sensory publication cadence.
+/// Simulation ticks cross only as temporal provenance so Runtime can order bodily sensation against
+/// visual evidence without reconstructing a host pose.
 /// </para>
 /// </remarks>
 public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
@@ -51,12 +53,11 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
     private const int DirectionChangeFlushSectors = 2;
     private const int RotationChangeFlushOctants = 2;
 
-    // V3 proprioception is deliberately not an odometer. Native movement is first calibrated to the
-    // same owner-local body scale used by perception/action realization, then quantized before it is
-    // allowed across the cognition boundary. One twentieth of a body length preserves useful short-
-    // horizon displacement structure without forwarding adapter-native precision.
-    private const double TranslationSensationQuantumBodyLengths = 0.05d;
-    private const int TranslationSensationUncertaintyMillionths = 50_000;
+    // The rich V3 displacement is an exact adapter transduction into COGR body-local units, not an
+    // odometer or world pose. Contract fixed-point encoding may bound transport precision, but the
+    // adapter does not add psychophysical quantization or uncertainty that the embodiment does not
+    // actually provide. Cognitive uncertainty is applied after ingress by Runtime faculties.
+    private const int TranslationTransductionUncertaintyMillionths = 0;
 
     // Ongoing embodied motion is a sensory stream. Bound aggregation near 8 Hz so current owner-frame
     // estimates can advance repeatedly during locomotion without coupling publication to MoveEvent
@@ -588,13 +589,11 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
                 COGREmbodimentSpatialCalibration.GenericHumanoidProfile,
                 departureBodyNative.Y);
 
-            var quantizedForward = QuantizeTranslationSensation(forwardBodyLengths);
-            var quantizedLeft = QuantizeTranslationSensation(leftBodyLengths);
             return new ProprioceptiveOwnerFrameTranslationEstimate(
-                BodyRelativeSpatialComponent.FromBodyLengths(quantizedForward),
-                BodyRelativeSpatialComponent.FromBodyLengths(quantizedLeft),
+                BodyRelativeSpatialComponent.FromBodyLengths(forwardBodyLengths),
+                BodyRelativeSpatialComponent.FromBodyLengths(leftBodyLengths),
                 0,
-                new PerceptualSpatialUncertainty(TranslationSensationUncertaintyMillionths));
+                new PerceptualSpatialUncertainty(TranslationTransductionUncertaintyMillionths));
         }
         catch (ArgumentException)
         {
@@ -604,16 +603,6 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
         {
             return null;
         }
-    }
-
-    private static double QuantizeTranslationSensation(double bodyLengths)
-    {
-        if (!double.IsFinite(bodyLengths))
-            throw new ArgumentOutOfRangeException(nameof(bodyLengths));
-
-        return Math.Round(
-            bodyLengths / TranslationSensationQuantumBodyLengths,
-            MidpointRounding.AwayFromZero) * TranslationSensationQuantumBodyLengths;
     }
 
     private static string FormatTranslationEstimate(
