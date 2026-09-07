@@ -10,6 +10,7 @@ using COGR.Core.Identifiers;
 using COGR.Core.Perception;
 using COGR.Core.Sequences;
 using COGR.Core.Time;
+using Content.Server.COGR;
 using Content.Server.Construction.Components;
 using Content.Server.DeviceLinking.Components;
 using Content.Shared.Doors.Components;
@@ -36,14 +37,12 @@ public sealed partial class COGRBoundedPerceptionSystem
 
     private void AddSpatialFeatures(
         List<ObservedFeature> features,
-        EntityUid observer,
-        EntityUid target,
-        double distance)
+        COGREgocentricSensoryFrame sensoryFrame,
+        EntityUid target)
     {
         if (!TryComputeLocalSpatialProjection(
-                observer,
+                sensoryFrame,
                 target,
-                distance,
                 out var localX,
                 out var localY,
                 out var localDistance))
@@ -52,20 +51,24 @@ public sealed partial class COGRBoundedPerceptionSystem
         }
 
         const double localZ = 0.0d;
-        features.Add(ObservedFeature.LocalX(localX, 0.95));
-        features.Add(ObservedFeature.LocalY(localY, 0.95));
-        features.Add(ObservedFeature.LocalZ(localZ, 0.95));
-        features.Add(ObservedFeature.LocalDistance(localDistance, 0.95));
+
+        // Current SS14 spatial geometry is exact transform-derived adapter evidence. Do not
+        // manufacture cognitive uncertainty at this transduction boundary; any future physical
+        // sensory degradation must be an explicit embodiment contract, not an arbitrary confidence.
+        features.Add(ObservedFeature.LocalX(localX, 1.0));
+        features.Add(ObservedFeature.LocalY(localY, 1.0));
+        features.Add(ObservedFeature.LocalZ(localZ, 1.0));
+        features.Add(ObservedFeature.LocalDistance(localDistance, 1.0));
     }
 
     /// <summary>
-    /// Computes the exact signed adapter-local spatial components used by perceptual evidence through the same paired
-    /// parent-frame/local transform used by projected movement and privileged diagnostics.
+    /// Computes signed adapter-local spatial components from the one immutable physical sensory
+    /// origin captured for the whole visual frame. Individual targets never re-resolve an observer
+    /// transform, so owner-relative zero and orientation cannot drift within one sensory frame.
     /// </summary>
     private bool TryComputeLocalSpatialProjection(
-        EntityUid observer,
+        COGREgocentricSensoryFrame sensoryFrame,
         EntityUid target,
-        double distance,
         out double localX,
         out double localY,
         out double localDistance)
@@ -74,29 +77,20 @@ public sealed partial class COGRBoundedPerceptionSystem
         localY = default;
         localDistance = default;
 
-        var observerTransform = Transform(observer);
-        var targetTransform = Transform(target);
-        var observerCoordinates = observerTransform.Coordinates;
-        var targetCoordinates = targetTransform.Coordinates;
-        if (observerCoordinates.EntityId != targetCoordinates.EntityId)
-            return false;
-
-        var delta = targetCoordinates.Position - observerCoordinates.Position;
-        if (!COGREmbodimentSpatialProjection.TryParentOffsetToOwnerRelativeLocal(
-                delta,
-                observerTransform.LocalRotation,
+        var targetCoordinates = Transform(target).Coordinates;
+        if (!sensoryFrame.TryProject(
+                targetCoordinates,
                 out var unquantizedLocalX,
-                out var unquantizedLocalY))
+                out var unquantizedLocalY,
+                out var unquantizedLocalDistance))
         {
             return false;
         }
 
+        // Six decimal places are transport/serialization precision, not a sensory-noise policy.
         localX = QuantizeLocalComponent(unquantizedLocalX);
         localY = QuantizeLocalComponent(unquantizedLocalY);
-        localDistance = QuantizeLocalComponent(
-            COGREmbodimentSpatialCalibration.NativeUnitsToLocalUnits(
-                COGREmbodimentSpatialCalibration.GenericHumanoidProfile,
-                distance));
+        localDistance = QuantizeLocalComponent(unquantizedLocalDistance);
         return double.IsFinite(localDistance);
     }
 
