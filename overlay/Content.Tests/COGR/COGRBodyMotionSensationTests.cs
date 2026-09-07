@@ -108,28 +108,29 @@ public sealed class COGRBodyMotionSensationTests
     }
 
     [Test]
-    public void ContinuousTranslationEstimate_UsesSharedCalibrationAndBoundedQuantization()
+    public void ContinuousTranslationEstimate_UsesSharedCalibrationWithoutSyntheticAdapterUncertainty()
     {
         var create = RequireStaticMethod("CreateTranslationEstimate", typeof(Vector2));
 
-        // Generic humanoid calibration is 0.70 native units per body-schema length. These deliberately
-        // non-round native inputs would expose adapter precision if the sensory boundary did not quantize.
+        // Generic humanoid calibration is 0.70 native units per body-schema length. Rich V3
+        // displacement is exact transform-derived adapter transduction (subject only to contract
+        // fixed-point precision), not a psychophysically quantized cognitive estimate.
         var result = create.Invoke(null, [new Vector2(0.713f, -0.349f)]);
 
         Assert.That(result, Is.Not.Null);
         var estimate = (ProprioceptiveOwnerFrameTranslationEstimate)result!;
         Assert.That(
             BodyRelativeSpatialComponent.ToBodyLengths(estimate.Forward),
-            Is.EqualTo(1d).Within(0.000001d));
+            Is.EqualTo(0.713d / 0.70d).Within(0.000002d));
         Assert.That(
             BodyRelativeSpatialComponent.ToBodyLengths(estimate.Left),
-            Is.EqualTo(-0.5d).Within(0.000001d));
+            Is.EqualTo(-0.349d / 0.70d).Within(0.000002d));
         Assert.That(estimate.Up, Is.Zero);
-        Assert.That(estimate.Uncertainty.Millionths, Is.EqualTo(50_000));
+        Assert.That(estimate.Uncertainty.Millionths, Is.Zero);
     }
 
     [Test]
-    public void ContinuousTranslationEstimate_DoesNotFallBackToDurationMagnitudeForTinyMotion()
+    public void ContinuousTranslationEstimate_DoesNotQuantizeAwaySmallAuthoritativeMotion()
     {
         var create = RequireStaticMethod("CreateTranslationEstimate", typeof(Vector2));
 
@@ -137,9 +138,11 @@ public sealed class COGRBodyMotionSensationTests
 
         Assert.That(result, Is.Not.Null);
         var estimate = (ProprioceptiveOwnerFrameTranslationEstimate)result!;
-        Assert.That(estimate.Forward, Is.Zero);
+        Assert.That(
+            BodyRelativeSpatialComponent.ToBodyLengths(estimate.Forward),
+            Is.EqualTo(0.01d / 0.70d).Within(0.000002d));
         Assert.That(estimate.Left, Is.Zero);
-        Assert.That(estimate.Uncertainty.Millionths, Is.EqualTo(50_000));
+        Assert.That(estimate.Uncertainty.Millionths, Is.Zero);
     }
 
     [Test]
