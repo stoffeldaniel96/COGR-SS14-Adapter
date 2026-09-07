@@ -10,6 +10,7 @@ using COGR.Core.Identifiers;
 using COGR.Core.Perception;
 using COGR.Core.Sequences;
 using COGR.Core.Time;
+using Content.Server.COGR;
 using Content.Server.Construction.Components;
 using Content.Server.DeviceLinking.Components;
 using Content.Shared.Doors.Components;
@@ -73,6 +74,18 @@ public sealed partial class COGRBoundedPerceptionSystem
         // interval merely because a different visual acquisition path invoked the common projector.
         _bodyMotion.NotifyVisualSamplingBoundary(observer);
 
+        // Capture the physical visual/egocentric origin exactly once for this sensory frame. This
+        // transform is adapter transduction authority, not cognition-owned self-location. Every
+        // owner-relative spatial observation below is expressed from this immutable origin epoch.
+        if (!TryCaptureEgocentricSensoryFrame(observer, currentTick, out var sensoryFrame))
+        {
+            return CreateFailureResult(
+                request,
+                currentTick,
+                OmissionCategory.AdapterCoverageLimited,
+                "The authoritative egocentric sensory origin is unavailable.");
+        }
+
         var requestedCandidates = request.Budget.MaxEntitiesConsidered ?? DefaultCandidateBudget;
         var requestedObservations = request.Budget.MaxObservationsReturned ?? DefaultObservationBudget;
         var requestedDistance = request.Budget.MaxDistance ??
@@ -103,7 +116,7 @@ public sealed partial class COGRBoundedPerceptionSystem
         else
         {
             _lookup.GetEntitiesInRange(
-                Transform(observer).Coordinates,
+                sensoryFrame.Origin,
                 (float)maxDistance,
                 nearby);
         }
@@ -128,14 +141,13 @@ public sealed partial class COGRBoundedPerceptionSystem
             if (_containers.IsEntityOrParentInContainer(entity))
                 continue;
 
-            if (!Transform(observer).Coordinates.TryDistance(
-                    EntityManager,
-                    Transform(entity).Coordinates,
-                    out var distance) ||
-                distance > maxDistance)
-            {
+            var targetCoordinates = Transform(entity).Coordinates;
+            if (!sensoryFrame.TryGetParentOffset(targetCoordinates, out var parentOffset))
                 continue;
-            }
+
+            var distance = parentOffset.Length();
+            if (!float.IsFinite(distance) || distance > maxDistance)
+                continue;
 
             if (!TryCreateCandidate(entity, distance, request.SearchConceptHints, out var candidate))
                 continue;
@@ -213,7 +225,7 @@ public sealed partial class COGRBoundedPerceptionSystem
 
             observations.Add(CreateObservation(
                 request,
-                observer,
+                sensoryFrame,
                 currentTick,
                 candidate,
                 registry,
@@ -259,6 +271,32 @@ public sealed partial class COGRBoundedPerceptionSystem
             Observations = observations,
             Omissions = CreateOmissions(exhaustionReason),
         };
+    }
+
+    private bool TryCaptureEgocentricSensoryFrame(
+        EntityUid observer,
+        SimTick currentTick,
+        out COGREgocentricSensoryFrame sensoryFrame)
+    {
+        sensoryFrame = default;
+        if (Deleted(observer))
+            return false;
+
+        var transform = Transform(observer);
+        try
+        {
+            sensoryFrame = new COGREgocentricSensoryFrame(
+                observer,
+                transform.Coordinates,
+                transform.LocalRotation,
+                currentTick);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            sensoryFrame = default;
+            return false;
+        }
     }
 
     private bool TryCreateCandidate(
