@@ -3,6 +3,7 @@ using System.Numerics;
 using Content.Shared.COGR.SpatialVisualization;
 using Robust.Client.Graphics;
 using Robust.Shared.Enums;
+using Robust.Shared.Log;
 using Robust.Shared.Map;
 using Robust.Shared.Timing;
 
@@ -15,9 +16,11 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
 
     [Dependency] private IOverlayManager _overlayManager = default!;
     [Dependency] private IGameTiming _timing = default!;
+    [Dependency] private ILogManager _logManager = default!;
 
     private readonly Dictionary<string, COGRSpatialVisualizationTarget> _targets = new(StringComparer.Ordinal);
     private readonly Dictionary<ulong, TimedPath> _paths = [];
+    private ISawmill _markerSawmill = default!;
     private string? _trackedAgentId;
     private string? _trackedTargetId;
     private int _residentTargetCount;
@@ -38,6 +41,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
     public override void Initialize()
     {
         base.Initialize();
+        _markerSawmill = _logManager.GetSawmill("cogr.spatialmarker");
         SubscribeNetworkEvent<COGRSpatialVisualizationMessage>(OnVisualizationMessage);
     }
 
@@ -152,6 +156,20 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
             var key = string.Concat(target.AgentId, ":", target.TargetId);
             currentKeys.Add(key);
             _targets[key] = target;
+
+            _markerSawmill.Info(
+                "spawn color={0} target={1} rev={2} egoWorld=map:{3}({4:F4},{5:F4}) local=({6:F4},{7:F4}) realizedWorld=map:{8}({9:F4},{10:F4})",
+                target.IsFocal ? "red" : "blue",
+                target.TargetId,
+                target.TargetRevision,
+                target.BodyOrigin.MapId,
+                target.BodyOrigin.Position.X,
+                target.BodyOrigin.Position.Y,
+                target.BeliefLocalX,
+                target.BeliefLocalY,
+                target.Belief.MapId,
+                target.Belief.Position.X,
+                target.Belief.Position.Y);
         }
 
         foreach (var key in _targets.Keys.Where(key => !currentKeys.Contains(key)).ToArray())
