@@ -10,6 +10,7 @@ using COGR.Core.Identifiers;
 using COGR.Core.Perception;
 using COGR.Core.Sequences;
 using COGR.Core.Time;
+using Content.Server.COGR;
 using Content.Server.Construction.Components;
 using Content.Server.DeviceLinking.Components;
 using Content.Shared.Doors.Components;
@@ -34,7 +35,7 @@ public sealed partial class COGRBoundedPerceptionSystem
 {
     private Observation CreateObservation(
         PerceptionRequest request,
-        EntityUid observer,
+        COGREgocentricSensoryFrame sensoryFrame,
         SimTick currentTick,
         NativeCandidate candidate,
         COGRReferenceRegistry registry,
@@ -46,14 +47,14 @@ public sealed partial class COGRBoundedPerceptionSystem
             currentTick,
             candidate,
             registry);
-        var features = CreateFeatures(observer, candidate);
+        var features = CreateFeatures(sensoryFrame, candidate);
 
         // Capture the exact signed adapter-local spatial sample emitted as perceptual evidence. This is privileged
         // observability only: recording is inactive without an admin spatial-debug subscriber and never feeds Runtime.
+        // The diagnostic sample uses the same immutable sensory-frame origin as the cognitive observation.
         if (TryComputeLocalSpatialProjection(
-                observer,
+                sensoryFrame,
                 candidate.Entity,
-                candidate.Distance,
                 out var diagnosticLocalX,
                 out var diagnosticLocalY,
                 out var diagnosticLocalDistance))
@@ -157,7 +158,7 @@ public sealed partial class COGRBoundedPerceptionSystem
     }
 
     private IReadOnlyList<ObservedFeature> CreateFeatures(
-        EntityUid observer,
+        COGREgocentricSensoryFrame sensoryFrame,
         NativeCandidate candidate)
     {
         var features = candidate.Category switch
@@ -173,7 +174,7 @@ public sealed partial class COGRBoundedPerceptionSystem
             _ => CreateGenericObjectFeatures(candidate.Entity),
         };
 
-        AddSpatialFeatures(features, observer, candidate.Entity, candidate.Distance);
+        AddSpatialFeatures(features, sensoryFrame, candidate.Entity);
         AddMotionFeature(features, candidate.Entity, candidate.Category);
         return features;
     }
