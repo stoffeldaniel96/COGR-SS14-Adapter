@@ -66,6 +66,13 @@ public sealed partial class COGRBoundedPerceptionSystem
                 "Station opaque environment-reference storage is unavailable.");
         }
 
+        // Every authoritative visual sample of this observer shares one temporal boundary with
+        // vestibular/kinesthetic self-motion, regardless of whether the caller is the passive
+        // semantic replica or focused/active perception. Closing the adapter-private aggregate here
+        // guarantees Runtime never receives a visual frame sampled inside a still-open V3 motion
+        // interval merely because a different visual acquisition path invoked the common projector.
+        _bodyMotion.NotifyVisualSamplingBoundary(observer);
+
         var requestedCandidates = request.Budget.MaxEntitiesConsidered ?? DefaultCandidateBudget;
         var requestedObservations = request.Budget.MaxObservationsReturned ?? DefaultObservationBudget;
         var requestedDistance = request.Budget.MaxDistance ??
