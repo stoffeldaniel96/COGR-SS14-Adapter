@@ -98,6 +98,28 @@ public sealed class COGRProjectedObjectiveSteeringTests
         Assert.That((double)inverseArgs[3]!, Is.EqualTo(-0.4d).Within(0.00001d));
     }
 
+    [TestCase(0d)]
+    [TestCase(0.37d)]
+    [TestCase(1.5707963267948966d)]
+    [TestCase(-2.2d)]
+    public void EgocentricOrigin_ProjectsToExactZeroAtAnyBodyRotation(double rotationRadians)
+    {
+        var inverse = RequireProjectionMethod("TryParentOffsetToOwnerRelativeLocal");
+        object?[] args =
+        [
+            Vector2.Zero,
+            new Angle(rotationRadians),
+            1d,
+            1d,
+        ];
+
+        var projected = (bool)inverse.Invoke(null, args)!;
+
+        Assert.That(projected, Is.True);
+        Assert.That((double)args[2]!, Is.Zero);
+        Assert.That((double)args[3]!, Is.Zero);
+    }
+
     [Test]
     public void ProjectedObjectiveArrivalTolerance_UsesNativeSteeringRange()
     {
