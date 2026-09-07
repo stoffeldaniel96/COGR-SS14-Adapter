@@ -12,12 +12,15 @@ public sealed partial class ShowCOGRSpatialVisualizationCommand : LocalizedEntit
 
     public override void Execute(IConsoleShell shell, string argStr, string[] args)
     {
-        if (args.Length != 1)
+        if (args.Length is < 1 or > 2)
         {
-            shell.WriteLine("Usage: showcogrspatial <agent-id|off>");
+            shell.WriteLine("Usage: showcogrspatial <agent-id> [target-id] | showcogrspatial off");
             if (_visualization.TrackedAgentId is { } current)
             {
-                shell.WriteLine($"Currently tracking {current}.");
+                var selectedTarget = string.IsNullOrWhiteSpace(_visualization.TrackedTargetId)
+                    ? "<none>"
+                    : _visualization.TrackedTargetId;
+                shell.WriteLine($"Currently tracking {current}; diagnostic target={selectedTarget}.");
                 shell.WriteLine(
                     $"Resident belief targets: {_visualization.ResidentTargetCount}; "
                     + $"map markers: {_visualization.ProjectedResidentTargetCount}; "
@@ -72,6 +75,12 @@ public sealed partial class ShowCOGRSpatialVisualizationCommand : LocalizedEntit
 
         if (string.Equals(args[0], "off", StringComparison.OrdinalIgnoreCase))
         {
+            if (args.Length != 1)
+            {
+                shell.WriteLine("Usage: showcogrspatial off");
+                return;
+            }
+
             _visualization.StopTracking();
             shell.WriteLine("COGR spatial visualization disabled.");
             return;
@@ -84,11 +93,18 @@ public sealed partial class ShowCOGRSpatialVisualizationCommand : LocalizedEntit
         }
 
         var agentId = agentGuid.ToString("D");
-        _visualization.TrackAgent(agentId);
+        var targetId = args.Length == 2 && !string.IsNullOrWhiteSpace(args[1])
+            ? args[1].Trim()
+            : null;
+        _visualization.TrackAgent(agentId, targetId);
         shell.WriteLine($"COGR spatial visualization tracking {agentId}.");
+        if (targetId is not null)
+            shell.WriteLine($"Bounded server spatial telemetry selected target {targetId}.");
+        else
+            shell.WriteLine("No server telemetry target selected; overlay still renders the complete Runtime visualization frame.");
         shell.WriteLine("Belief targets render blue; explicit perceptual focus renders red; resolved Coggent body origin renders cyan; privileged current actual referent renders yellow.");
         shell.WriteLine("Markers retire only when a successful Runtime full frame no longer reports that resident target.");
-        shell.WriteLine("Run 'showcogrspatial' with no argument to inspect signed projection, sample age, TargetId/revision, and calibration invariants.");
+        shell.WriteLine("Run 'showcogrspatial' with no argument to inspect TargetIds, then rerun with one target-id to enable bounded server trace telemetry.");
     }
 
     private static string Format(bool hasValue, double value) => hasValue ? value.ToString("F4") : "n/a";
