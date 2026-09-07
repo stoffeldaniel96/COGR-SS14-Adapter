@@ -155,6 +155,7 @@ public sealed partial class COGRBoundedPerceptionSystem : EntitySystem
     private readonly Dictionary<AgentId, HashSet<EnvironmentRef>> _agentReferenceCache = new();
     private COGRAdapterSystem _adapter = default!;
     private COGRBodyAuthorityCoordinatorSystem _authority = default!;
+    private COGRBodyMotionSensationSystem _bodyMotion = default!;
     private ISawmill _sawmill = default!;
 
     public override void Initialize()
@@ -162,6 +163,7 @@ public sealed partial class COGRBoundedPerceptionSystem : EntitySystem
         base.Initialize();
         _adapter = EntityManager.System<COGRAdapterSystem>();
         _authority = EntityManager.System<COGRBodyAuthorityCoordinatorSystem>();
+        _bodyMotion = EntityManager.System<COGRBodyMotionSensationSystem>();
         _sawmill = _logManager.GetSawmill("cogr.perception");
     }
 }
