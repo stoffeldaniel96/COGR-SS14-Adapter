@@ -19,12 +19,14 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
     private readonly Dictionary<string, COGRSpatialVisualizationTarget> _targets = new(StringComparer.Ordinal);
     private readonly Dictionary<ulong, TimedPath> _paths = [];
     private string? _trackedAgentId;
+    private string? _trackedTargetId;
     private int _residentTargetCount;
     private int _richlyMaintainedTargetCount;
     private int _unprojectableResidentTargetCount;
 
     public bool Enabled => _trackedAgentId is not null;
     public string? TrackedAgentId => _trackedAgentId;
+    public string? TrackedTargetId => _trackedTargetId;
     public int ResidentTargetCount => _residentTargetCount;
     public int RichlyMaintainedTargetCount => _richlyMaintainedTargetCount;
     public int UnprojectableResidentTargetCount => _unprojectableResidentTargetCount;
@@ -45,16 +47,23 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         base.Shutdown();
     }
 
-    /// <summary>Begins observing one exact Coggent. Switching agents first retires the previous observer scope.</summary>
-    public void TrackAgent(string agentId)
+    /// <summary>
+    /// Begins observing one exact Coggent. An optional target identity scopes server-side diagnostic telemetry only; the
+    /// client still receives and renders the complete successful Runtime visualization frame.
+    /// </summary>
+    public void TrackAgent(string agentId, string? targetId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(agentId);
         if (!Guid.TryParse(agentId, out var parsed) || parsed == Guid.Empty)
             throw new ArgumentException("COGR spatial visualization requires an assigned agent UUID.", nameof(agentId));
 
         var canonical = parsed.ToString("D");
-        if (string.Equals(_trackedAgentId, canonical, StringComparison.Ordinal))
+        var selectedTargetId = string.IsNullOrWhiteSpace(targetId) ? null : targetId.Trim();
+        if (string.Equals(_trackedAgentId, canonical, StringComparison.Ordinal)
+            && string.Equals(_trackedTargetId, selectedTargetId, StringComparison.Ordinal))
+        {
             return;
+        }
 
         if (_trackedAgentId is not null)
         {
@@ -62,10 +71,12 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
             {
                 Enabled = false,
                 AgentId = _trackedAgentId,
+                TargetId = _trackedTargetId ?? string.Empty,
             });
         }
 
         _trackedAgentId = canonical;
+        _trackedTargetId = selectedTargetId;
         Clear();
         if (!_overlayManager.HasOverlay<COGRSpatialVisualizationOverlay>())
             _overlayManager.AddOverlay(new COGRSpatialVisualizationOverlay(this));
@@ -74,6 +85,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         {
             Enabled = true,
             AgentId = canonical,
+            TargetId = selectedTargetId ?? string.Empty,
         });
     }
 
@@ -86,10 +98,12 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
             {
                 Enabled = false,
                 AgentId = agentId,
+                TargetId = _trackedTargetId ?? string.Empty,
             });
         }
 
         _trackedAgentId = null;
+        _trackedTargetId = null;
         _overlayManager.RemoveOverlay<COGRSpatialVisualizationOverlay>();
         Clear();
     }
