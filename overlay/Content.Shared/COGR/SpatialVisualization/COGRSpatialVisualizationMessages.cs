@@ -9,6 +9,10 @@ public sealed class RequestCOGRSpatialVisualizationMessage : EntityEventArgs
 {
     public bool Enabled;
     public string AgentId = string.Empty;
+
+    // Optional exact belief target selected only to bound admin-side diagnostic telemetry. This value is never sent to the
+    // Runtime, never affects cognition, and does not filter the full visualization frame delivered to the observing client.
+    public string TargetId = string.Empty;
 }
 
 /// <summary>One resident COGR-owned spatial belief projected into Station map coordinates solely for admin visualization.</summary>
