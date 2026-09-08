@@ -41,6 +41,7 @@ public sealed partial class COGRRegionalPerceptionRouterSystem : EntitySystem
     private readonly Dictionary<SemanticReplicaOwner, RegionKey> _ownerRegions = new();
     private readonly Dictionary<PassiveCueKey, TimeSpan> _lastPassiveCueAttemptAt = new();
 
+    private SharedTransformSystem _transform = default!;
     private COGRBodyAuthorityCoordinatorSystem _authority = default!;
     private COGRBodyMotionSensationSystem _bodyMotion = default!;
     private COGRBoundedPerceptionSystem _perception = default!;
@@ -50,6 +51,7 @@ public sealed partial class COGRRegionalPerceptionRouterSystem : EntitySystem
     public override void Initialize()
     {
         base.Initialize();
+        _transform = EntityManager.System<SharedTransformSystem>();
         _authority = EntityManager.System<COGRBodyAuthorityCoordinatorSystem>();
         _bodyMotion = EntityManager.System<COGRBodyMotionSensationSystem>();
         _perception = EntityManager.System<COGRBoundedPerceptionSystem>();
@@ -59,11 +61,13 @@ public sealed partial class COGRRegionalPerceptionRouterSystem : EntitySystem
         EntityManager.EntityInitialized += OnEntityInitialized;
         EntityManager.EntityDirtied += OnEntityDirtied;
 
-        // Transform movement is the authoritative common movement event actually emitted for world
-        // entities. Keep one fan-out point here: a controlled body first contributes passive embodied
-        // motion sensation from the raw event, then the same event may drive the coarser regional and
-        // visual-semantic wake policy. Do not rely on a second component-specific MoveEvent route.
-        SubscribeLocalEvent<TransformComponent, MoveEvent>(OnEntityMoved);
+        // RobustToolbox MoveEvent is directed and is explicitly not a broadcast event. This router
+        // intentionally observes movement across the world, so use the engine-owned global transform
+        // callback instead of relying on a component-local subscription that may never receive live
+        // arbitrary movement. Keep one fan-out point here: a controlled body first contributes passive
+        // embodied motion sensation from the raw event, then the same event may drive the coarser
+        // regional and visual-semantic wake policy.
+        _transform.OnGlobalMoveEvent += OnEntityMoved;
 
         // Every entity owns MetaDataComponent, so one generic termination subscription closes both
         // reference revocation and retained visual-state invalidation without category-specific hooks.
@@ -72,6 +76,7 @@ public sealed partial class COGRRegionalPerceptionRouterSystem : EntitySystem
 
     public override void Shutdown()
     {
+        _transform.OnGlobalMoveEvent -= OnEntityMoved;
         EntityManager.EntityInitialized -= OnEntityInitialized;
         EntityManager.EntityDirtied -= OnEntityDirtied;
         _subscribers.Clear();
@@ -213,11 +218,11 @@ public sealed partial class COGRRegionalPerceptionRouterSystem : EntitySystem
         _perception.NotifyEntityTerminating(entity.Owner);
     }
 
-    private void OnEntityMoved(
-        EntityUid uid,
-        TransformComponent component,
-        ref MoveEvent args)
+    private void OnEntityMoved(ref MoveEvent args)
     {
+        var uid = args.Sender;
+        var component = args.Component;
+
         // Passive embodied motion must observe every authoritative controlled-body transform event,
         // including sub-cell movement that is intentionally too small to wake semantic scene sampling.
         // Fan it out before any regional early return so proprioception is not coupled to visual scope.
