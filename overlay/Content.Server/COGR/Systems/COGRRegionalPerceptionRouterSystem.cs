@@ -59,10 +59,10 @@ public sealed partial class COGRRegionalPerceptionRouterSystem : EntitySystem
         EntityManager.EntityInitialized += OnEntityInitialized;
         EntityManager.EntityDirtied += OnEntityDirtied;
 
-        // Robust directed component events permit one subscriber for a component/event pair. This
-        // router therefore owns controlled-body MoveEvent and fans the raw movement first to passive
-        // embodied sensation, then applies its coarser visual-semantic sampling policy below.
-        SubscribeLocalEvent<COGRControlledComponent, MoveEvent>(OnControlledBodyMoved);
+        // Transform movement is the authoritative common movement event actually emitted for world
+        // entities. Keep one fan-out point here: a controlled body first contributes passive embodied
+        // motion sensation from the raw event, then the same event may drive the coarser regional and
+        // visual-semantic wake policy. Do not rely on a second component-specific MoveEvent route.
         SubscribeLocalEvent<TransformComponent, MoveEvent>(OnEntityMoved);
 
         // Every entity owns MetaDataComponent, so one generic termination subscription closes both
@@ -213,41 +213,17 @@ public sealed partial class COGRRegionalPerceptionRouterSystem : EntitySystem
         _perception.NotifyEntityTerminating(entity.Owner);
     }
 
-    private void OnControlledBodyMoved(
-        EntityUid uid,
-        COGRControlledComponent controlled,
-        ref MoveEvent args)
-    {
-        // Passive embodied motion observes the raw authoritative movement stream even when the
-        // displacement is too small to cross this router's visual-semantic sampling boundary.
-        _bodyMotion.NotifyControlledBodyMoved(uid, controlled, ref args);
-
-        if (!TryGetCurrentOwner(controlled, out var owner))
-            return;
-
-        if (!TryComp(uid, out TransformComponent? transform) ||
-            !TryGetRegion(transform, out var currentRegion))
-        {
-            RemoveOwner(owner);
-            return;
-        }
-
-        MoveOwner(owner, currentRegion);
-
-        var previousParent = args.OldPosition.EntityId;
-        var currentParent = args.NewPosition.EntityId;
-        var meaningfulSelfMotion = previousParent != currentParent
-            || CrossedSemanticMotionCell(args.OldPosition.Position, args.NewPosition.Position);
-        if (meaningfulSelfMotion)
-            _semanticReplica.NotifySemanticScopeDirty(owner, "observer_moved");
-    }
-
     private void OnEntityMoved(
         EntityUid uid,
         TransformComponent component,
         ref MoveEvent args)
     {
-        _ = component;
+        // Passive embodied motion must observe every authoritative controlled-body transform event,
+        // including sub-cell movement that is intentionally too small to wake semantic scene sampling.
+        // Fan it out before any regional early return so proprioception is not coupled to visual scope.
+        if (TryComp(uid, out COGRControlledComponent? controlled))
+            RouteControlledBodyMovement(uid, component, controlled, ref args);
+
         if (_ownerRegions.Count == 0)
             return;
 
@@ -269,6 +245,33 @@ public sealed partial class COGRRegionalPerceptionRouterSystem : EntitySystem
             currentParent,
             args.NewPosition.Position,
             "entity_moved");
+    }
+
+    private void RouteControlledBodyMovement(
+        EntityUid uid,
+        TransformComponent transform,
+        COGRControlledComponent controlled,
+        ref MoveEvent args)
+    {
+        _bodyMotion.NotifyControlledBodyMoved(uid, controlled, ref args);
+
+        if (!TryGetCurrentOwner(controlled, out var owner))
+            return;
+
+        if (!TryGetRegion(transform, out var currentRegion))
+        {
+            RemoveOwner(owner);
+            return;
+        }
+
+        MoveOwner(owner, currentRegion);
+
+        var previousParent = args.OldPosition.EntityId;
+        var currentParent = args.NewPosition.EntityId;
+        var meaningfulSelfMotion = previousParent != currentParent
+            || CrossedSemanticMotionCell(args.OldPosition.Position, args.NewPosition.Position);
+        if (meaningfulSelfMotion)
+            _semanticReplica.NotifySemanticScopeDirty(owner, "observer_moved");
     }
 
     private bool PublishMovementEndpoint(
