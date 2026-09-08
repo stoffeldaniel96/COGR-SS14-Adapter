@@ -1,5 +1,6 @@
 using System;
 using System.Reflection;
+using System.Reflection.Emit;
 using Content.Server.COGR.Systems;
 using NUnit.Framework;
 using Robust.Shared.GameObjects;
@@ -70,23 +71,59 @@ public sealed class COGRBodyMotionRoutingTests
     private static bool ContainsMethodReference(MethodInfo caller, MethodInfo callee)
     {
         var il = caller.GetMethodBody()?.GetILAsByteArray();
-        if (il is null || il.Length < sizeof(int))
+        if (il is null || il.Length < 5)
             return false;
 
-        var token = BitConverter.GetBytes(callee.MetadataToken);
-        for (var index = 0; index <= il.Length - token.Length; index++)
+        // Calls to methods in another assembly are encoded in the caller IL with a MemberRef token,
+        // not the callee assembly's MethodDef token. Resolve each actual call operand through the
+        // caller module before comparing the referenced method. The previous raw-token byte search
+        // only happened to work for same-assembly calls and produced a false negative for
+        // SharedTransformSystem.OnGlobalMoveEvent's add/remove accessors.
+        var call = unchecked((byte)OpCodes.Call.Value);
+        var callVirt = unchecked((byte)OpCodes.Callvirt.Value);
+        for (var index = 0; index <= il.Length - 5; index++)
         {
-            var matches = true;
-            for (var offset = 0; offset < token.Length; offset++)
+            if (il[index] != call && il[index] != callVirt)
+                continue;
+
+            var token = BitConverter.ToInt32(il, index + 1);
+            MethodBase? resolved;
+            try
             {
-                if (il[index + offset] == token[offset])
+                resolved = caller.Module.ResolveMethod(token);
+            }
+            catch (ArgumentException)
+            {
+                continue;
+            }
+            catch (BadImageFormatException)
+            {
+                continue;
+            }
+
+            if (resolved is not MethodInfo method ||
+                method.DeclaringType != callee.DeclaringType ||
+                method.Name != callee.Name)
+            {
+                continue;
+            }
+
+            var actualParameters = method.GetParameters();
+            var expectedParameters = callee.GetParameters();
+            if (actualParameters.Length != expectedParameters.Length)
+                continue;
+
+            var signatureMatches = true;
+            for (var parameterIndex = 0; parameterIndex < actualParameters.Length; parameterIndex++)
+            {
+                if (actualParameters[parameterIndex].ParameterType == expectedParameters[parameterIndex].ParameterType)
                     continue;
 
-                matches = false;
+                signatureMatches = false;
                 break;
             }
 
-            if (matches)
+            if (signatureMatches)
                 return true;
         }
 
