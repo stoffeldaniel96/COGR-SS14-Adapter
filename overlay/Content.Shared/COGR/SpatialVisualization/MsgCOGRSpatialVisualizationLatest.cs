@@ -2,7 +2,6 @@ using System.IO;
 using Lidgren.Network;
 using Robust.Shared.Network;
 using Robust.Shared.Serialization;
-using Robust.Shared.Utility;
 
 namespace Content.Shared.COGR.SpatialVisualization;
 
@@ -27,7 +26,7 @@ public sealed class MsgCOGRSpatialVisualizationLatest : NetMessage
     public override void ReadFromBuffer(NetIncomingMessage buffer, IRobustSerializer serializer)
     {
         var length = buffer.ReadVariableInt32();
-        using var stream = RobustMemoryManager.GetMemoryStream(length);
+        using var stream = new MemoryStream(length);
         buffer.ReadAlignedMemory(stream, length);
         Snapshot = serializer.Deserialize<COGRSpatialVisualizationMessage>(stream);
     }
