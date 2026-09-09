@@ -16,7 +16,7 @@ namespace Content.Shared.COGR.SpatialVisualization;
 /// </summary>
 public sealed class MsgCOGRSpatialVisualizationLatest : NetMessage
 {
-    public COGRSpatialVisualizationMessage Snapshot { get; set; } = new();
+    public COGRSpatialVisualizationMessage Snapshot { get; set; } = null!;
 
     public override MsgGroups MsgGroup => MsgGroups.EntityEvent;
 
