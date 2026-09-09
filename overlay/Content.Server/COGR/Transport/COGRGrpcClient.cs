@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Channels;
@@ -21,6 +23,8 @@ namespace Content.Server.COGR.Transport;
 /// </summary>
 public sealed class COGRGrpcClient : IAsyncDisposable
 {
+    private const string SpatialVisualizationPollCommand = "cogr.debug.spatial.poll";
+
     private readonly string _endpoint;
     private readonly ISawmill _sawmill;
     private readonly Channel<Proto.EnvironmentEnvelope> _outgoing = Channel.CreateBounded<Proto.EnvironmentEnvelope>(
@@ -31,6 +35,8 @@ public sealed class COGRGrpcClient : IAsyncDisposable
             AllowSynchronousContinuations = false,
             FullMode = BoundedChannelFullMode.Wait,
         });
+    private readonly ConcurrentDictionary<string, long> _spatialAdminEnqueuedAt = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, long> _spatialAdminWrittenAt = new(StringComparer.Ordinal);
 
     private GrpcChannel? _channel;
     private Proto.RuntimeService.RuntimeServiceClient? _client;
@@ -61,7 +67,7 @@ public sealed class COGRGrpcClient : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         if (_disposed)
-            throw new ObjectDisposedException(nameof(COGRGrpcClient));
+            throw new ObjectDisposedException(nameof(COGRConnectionManager));
         if (IsConnected)
             return COGRHandshakeResult.Failed("A duplex stream is already active.");
 
@@ -168,6 +174,10 @@ public sealed class COGRGrpcClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(envelope);
         if (!IsConnected)
             return ValueTask.FromException(new InvalidOperationException("COGR duplex stream is not connected."));
+
+        if (IsSpatialDiagnosticPoll(envelope, out var correlationId))
+            _spatialAdminEnqueuedAt[correlationId] = Stopwatch.GetTimestamp();
+
         return _outgoing.Writer.WriteAsync(envelope, cancellationToken);
     }
 
@@ -255,7 +265,34 @@ public sealed class COGRGrpcClient : IAsyncDisposable
             {
                 if (_stream == null)
                     break;
+
+                var writeStartedAt = Stopwatch.GetTimestamp();
+                string? spatialCorrelationId = null;
+                if (IsSpatialDiagnosticPoll(envelope, out var correlationId))
+                {
+                    spatialCorrelationId = correlationId;
+                    var queueMs = _spatialAdminEnqueuedAt.TryRemove(correlationId, out var enqueuedAt)
+                        ? Stopwatch.GetElapsedTime(enqueuedAt, writeStartedAt).TotalMilliseconds
+                        : -1.0;
+                    _sawmill.Info(
+                        "[COGR][SpatialAdminTransport] write-start correlation={0} sourceSequence={1} queueMs={2:F1}",
+                        correlationId,
+                        envelope.SourceSequence?.Value ?? 0,
+                        queueMs);
+                }
+
                 await _stream.RequestStream.WriteAsync(envelope, cancellationToken).ConfigureAwait(false);
+
+                if (spatialCorrelationId is not null)
+                {
+                    var writtenAt = Stopwatch.GetTimestamp();
+                    _spatialAdminWrittenAt[spatialCorrelationId] = writtenAt;
+                    _sawmill.Info(
+                        "[COGR][SpatialAdminTransport] write-complete correlation={0} sourceSequence={1} writeMs={2:F1}",
+                        spatialCorrelationId,
+                        envelope.SourceSequence?.Value ?? 0,
+                        Stopwatch.GetElapsedTime(writeStartedAt, writtenAt).TotalMilliseconds);
+                }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -275,7 +312,24 @@ public sealed class COGRGrpcClient : IAsyncDisposable
                 return;
 
             while (await _stream.ResponseStream.MoveNext(cancellationToken).ConfigureAwait(false))
-                MessageReceived?.Invoke(_stream.ResponseStream.Current);
+            {
+                var envelope = _stream.ResponseStream.Current;
+                if (envelope.PayloadCase == Proto.RuntimeEnvelope.PayloadOneofCase.AdminResponse
+                    && !string.IsNullOrWhiteSpace(envelope.AdminResponse?.CorrelationId?.Value))
+                {
+                    var correlationId = envelope.AdminResponse.CorrelationId.Value;
+                    if (_spatialAdminWrittenAt.TryRemove(correlationId, out var writtenAt))
+                    {
+                        _sawmill.Info(
+                            "[COGR][SpatialAdminTransport] response correlation={0} runtimeSequence={1} responseMs={2:F1}",
+                            correlationId,
+                            envelope.RuntimeSequence?.Value ?? 0,
+                            Stopwatch.GetElapsedTime(writtenAt).TotalMilliseconds);
+                    }
+                }
+
+                MessageReceived?.Invoke(envelope);
+            }
 
             HandleTransportFailure(null);
         }
@@ -309,6 +363,8 @@ public sealed class COGRGrpcClient : IAsyncDisposable
             await _streamCts.CancelAsync().ConfigureAwait(false);
 
         _outgoing.Writer.TryComplete();
+        _spatialAdminEnqueuedAt.Clear();
+        _spatialAdminWrittenAt.Clear();
 
         if (_stream != null)
         {
@@ -336,6 +392,20 @@ public sealed class COGRGrpcClient : IAsyncDisposable
         _channel = null;
         _streamCts?.Dispose();
         _streamCts = null;
+    }
+
+    private static bool IsSpatialDiagnosticPoll(Proto.EnvironmentEnvelope envelope, out string correlationId)
+    {
+        correlationId = string.Empty;
+        if (envelope.PayloadCase != Proto.EnvironmentEnvelope.PayloadOneofCase.AdminInput
+            || !string.Equals(envelope.AdminInput.Command, SpatialVisualizationPollCommand, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(envelope.CorrelationId?.Value))
+        {
+            return false;
+        }
+
+        correlationId = envelope.CorrelationId.Value;
+        return true;
     }
 
     private static async Task IgnoreCancellationAsync(Task task)
