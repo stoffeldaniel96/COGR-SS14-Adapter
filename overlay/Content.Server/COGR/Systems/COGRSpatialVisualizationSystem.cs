@@ -284,7 +284,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
 
         // Close any pending continuous owner motion before sampling the diagnostic ego frame. The generated proprioceptive
         // evidence remains ordinary environment evidence; SendAdministrativeCommand drains it ahead of the admin poll.
-        _bodyMotion.NotifyVisualSamplingBoundary(resolvedBody.Value);
+        _bodyMotion.NotifyOwnerFrameSamplingBoundary(resolvedBody.Value);
 
         if (!TryComp(resolvedBody.Value, out TransformComponent? xform))
             return false;
