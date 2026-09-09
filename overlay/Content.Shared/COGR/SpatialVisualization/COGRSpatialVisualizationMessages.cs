@@ -1,3 +1,4 @@
+using System.Threading;
 using Robust.Shared.Map;
 using Robust.Shared.Serialization;
 
@@ -76,6 +77,15 @@ public sealed class COGRSpatialVisualizationPath
 [Serializable, NetSerializable]
 public sealed class COGRSpatialVisualizationMessage : EntityEventArgs
 {
+    private static readonly Guid ProcessVisualizationStreamId = Guid.NewGuid();
+    private static long _nextVisualizationFrameSequence;
+
+    // These values identify one exact server-created visualization frame. They are observer-only transport metadata: they do
+    // not enter Runtime cognition. The stream id allows a client to reset monotonic ordering after a Station process restart;
+    // the sequence prevents delayed or reordered older debug frames from overwriting a newer marker installation.
+    public Guid VisualizationStreamId = ProcessVisualizationStreamId;
+    public ulong VisualizationFrameSequence = unchecked((ulong)Interlocked.Increment(ref _nextVisualizationFrameSequence));
+
     public string AgentId = string.Empty;
     public int ResidentTargetCount;
     public int RichlyMaintainedTargetCount;
