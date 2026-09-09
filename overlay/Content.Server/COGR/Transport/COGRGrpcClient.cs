@@ -67,7 +67,7 @@ public sealed class COGRGrpcClient : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         if (_disposed)
-            throw new ObjectDisposedException(nameof(COGRConnectionManager));
+            throw new ObjectDisposedException(nameof(COGRGrpcClient));
         if (IsConnected)
             return COGRHandshakeResult.Failed("A duplex stream is already active.");
 
