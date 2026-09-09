@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using System.Reflection.Emit;
 using Content.Server.COGR;
@@ -59,7 +60,7 @@ public sealed class COGRSpatialDiagnosticCausalFrameTests
             Is.True,
             "The diagnostic poll frame must close pending owner motion before sampling the host body frame.");
 
-        var captureOffset = RequireCallOffset(sendPoll!, capture);
+        var captureOffset = RequireCallOffset(sendPoll!, capture!);
         var sendOffset = RequireCallOffset(sendPoll, sendAdministrative!);
         Assert.That(
             captureOffset,
