@@ -35,7 +35,8 @@ public sealed class MsgCOGRSpatialVisualizationLatest : NetMessage
     {
         using var stream = new MemoryStream();
         serializer.Serialize(stream, Snapshot);
-        buffer.WriteVariableInt32(checked((int)stream.Length));
-        buffer.Write(stream.AsSpan());
+        var payload = stream.ToArray();
+        buffer.WriteVariableInt32(payload.Length);
+        buffer.Write(payload);
     }
 }
