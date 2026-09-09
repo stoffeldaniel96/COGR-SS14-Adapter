@@ -147,7 +147,7 @@ public sealed class COGRSpatialDiagnosticCausalFrameTests
     public void ClientLatestTransport_ReusesExistingFrameAcceptanceAndInstallBoundary()
     {
         var transportType = typeof(Content.Client.COGR.COGRSpatialVisualizationLatestTransportSystem);
-        var update = transportType.GetMethod(nameof(EntitySystem.Update), InstancePublic);
+        var update = transportType.GetMethod("Update", InstancePublic);
         var clientType = typeof(Content.Client.COGR.COGRSpatialVisualizationSystem);
         var acceptLatest = clientType.GetMethod("AcceptLatestTransportSnapshot", InstanceNonPublic);
         var handler = clientType.GetMethod("OnVisualizationMessage", InstanceNonPublic);
