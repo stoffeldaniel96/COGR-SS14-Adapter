@@ -481,7 +481,7 @@ public sealed class COGRGrpcClient : IAsyncDisposable
         return capabilities;
     }
 
-    private static bool MatchesContext(Proto.EnvironmentEnvelope envelope, WorldId worldId, ConnectionId connectionId) =>
+    private static bool MatchesContext(Proto.RuntimeEnvelope envelope, WorldId worldId, ConnectionId connectionId) =>
         Guid.TryParse(envelope.WorldId?.Value, out var responseWorld) &&
         Guid.TryParse(envelope.ConnectionId?.Value, out var responseConnection) &&
         responseWorld == worldId.ToGuid() &&
