@@ -157,7 +157,7 @@ public sealed class COGRGrpcClient : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            _sawmill.Error("Failed to establish COGR runtime: {0}", ex.Message);
+            _sawmill.Error("Failed to establish COGR duplex stream: {0}", ex.Message);
             await CleanupAsync().ConfigureAwait(false);
             return COGRHandshakeResult.Failed(ex.Message);
         }
