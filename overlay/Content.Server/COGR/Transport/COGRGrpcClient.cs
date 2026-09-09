@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Concurrent;
-using System.Diagnostics;
+using Stopwatch = System.Diagnostics.Stopwatch;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Channels;
@@ -157,7 +157,7 @@ public sealed class COGRGrpcClient : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            _sawmill.Error("Failed to establish COGR duplex stream: {0}", ex.Message);
+            _sawmill.Error("Failed to establish COGR runtime: {0}", ex.Message);
             await CleanupAsync().ConfigureAwait(false);
             return COGRHandshakeResult.Failed(ex.Message);
         }
@@ -481,7 +481,7 @@ public sealed class COGRGrpcClient : IAsyncDisposable
         return capabilities;
     }
 
-    private static bool MatchesContext(Proto.RuntimeEnvelope envelope, WorldId worldId, ConnectionId connectionId) =>
+    private static bool MatchesContext(Proto.EnvironmentEnvelope envelope, WorldId worldId, ConnectionId connectionId) =>
         Guid.TryParse(envelope.WorldId?.Value, out var responseWorld) &&
         Guid.TryParse(envelope.ConnectionId?.Value, out var responseConnection) &&
         responseWorld == worldId.ToGuid() &&
