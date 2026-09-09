@@ -5,7 +5,9 @@ using System.Reflection.Emit;
 using Content.Server.COGR;
 using Content.Server.COGR.Systems;
 using Content.Shared.COGR.SpatialVisualization;
+using Lidgren.Network;
 using NUnit.Framework;
+using Robust.Shared.Network;
 
 namespace Content.Tests.COGR;
 
@@ -106,6 +108,67 @@ public sealed class COGRSpatialDiagnosticCausalFrameTests
         Assert.That(second.VisualizationStreamId, Is.EqualTo(first.VisualizationStreamId));
         Assert.That(first.VisualizationFrameSequence, Is.GreaterThan(0UL));
         Assert.That(second.VisualizationFrameSequence, Is.GreaterThan(first.VisualizationFrameSequence));
+    }
+
+    [Test]
+    public void LatestVisualizationTransport_IsReplaceableUnreliableState()
+    {
+        var message = new MsgCOGRSpatialVisualizationLatest();
+
+        Assert.That(
+            message.DeliveryMethod,
+            Is.EqualTo(NetDeliveryMethod.Unreliable),
+            "A replaceable full diagnostic snapshot must not inherit reliable-ordered MsgEntity head-of-line semantics.");
+    }
+
+    [Test]
+    public void ServerVisualizationSend_UsesLatestStateNetMessageOverload()
+    {
+        var systemType = typeof(COGRSpatialVisualizationSystem);
+        var sendOverload = systemType.GetMethod(
+            "RaiseNetworkEvent",
+            InstanceNonPublic,
+            binder: null,
+            types: [typeof(COGRSpatialVisualizationMessage), typeof(INetChannel)],
+            modifiers: null);
+        var sendLatest = typeof(INetManager).GetMethod(
+            nameof(INetManager.ServerSendMessage),
+            [typeof(NetMessage), typeof(INetChannel)]);
+
+        Assert.That(sendOverload, Is.Not.Null);
+        Assert.That(sendLatest, Is.Not.Null);
+        Assert.That(
+            ContainsMethodReference(sendOverload!, sendLatest!),
+            Is.True,
+            "Spatial snapshots must leave Station through the dedicated latest-state message rather than simulation-tick MsgEntity dispatch.");
+    }
+
+    [Test]
+    public void ClientLatestTransport_ReusesExistingFrameAcceptanceAndInstallBoundary()
+    {
+        var transportType = typeof(Content.Client.COGR.COGRSpatialVisualizationLatestTransportSystem);
+        var update = transportType.GetMethod(nameof(EntitySystem.Update), InstancePublic);
+        var clientType = typeof(Content.Client.COGR.COGRSpatialVisualizationSystem);
+        var acceptLatest = clientType.GetMethod("AcceptLatestTransportSnapshot", InstanceNonPublic);
+        var handler = clientType.GetMethod("OnVisualizationMessage", InstanceNonPublic);
+        var acceptance = clientType.GetMethod("TryAcceptVisualizationFrame", InstanceNonPublic);
+
+        Assert.That(update, Is.Not.Null);
+        Assert.That(acceptLatest, Is.Not.Null);
+        Assert.That(handler, Is.Not.Null);
+        Assert.That(acceptance, Is.Not.Null);
+        Assert.That(
+            ContainsMethodReference(update!, acceptLatest!),
+            Is.True,
+            "The raw net callback must transfer latest-state snapshots onto the client entity-system update boundary.");
+        Assert.That(
+            ContainsMethodReference(acceptLatest!, handler!),
+            Is.True,
+            "The latest-state transport must reuse the established visualization install path.");
+        Assert.That(
+            ContainsMethodReference(handler!, acceptance!),
+            Is.True,
+            "The client must still classify visualization frame currency before installing marker state.");
     }
 
     [Test]
