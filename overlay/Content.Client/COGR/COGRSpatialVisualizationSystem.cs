@@ -26,6 +26,8 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
     private int _residentTargetCount;
     private int _richlyMaintainedTargetCount;
     private int _unprojectableResidentTargetCount;
+    private Guid _visualizationStreamId;
+    private ulong _latestVisualizationFrameSequence;
 
     public bool Enabled => _trackedAgentId is not null;
     public string? TrackedAgentId => _trackedAgentId;
@@ -134,6 +136,9 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
             return;
         }
 
+        if (!TryAcceptVisualizationFrame(message))
+            return;
+
         _residentTargetCount = Math.Max(0, message.ResidentTargetCount);
         _richlyMaintainedTargetCount = Math.Clamp(
             message.RichlyMaintainedTargetCount,
@@ -158,7 +163,9 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
             _targets[key] = target;
 
             _markerSawmill.Info(
-                "spawn color={0} target={1} rev={2} egoWorld=map:{3}({4:F4},{5:F4}) local=({6:F4},{7:F4}) realizedWorld=map:{8}({9:F4},{10:F4})",
+                "spawn frame={0} stream={1:N} color={2} target={3} rev={4} egoWorld=map:{5}({6:F4},{7:F4}) local=({8:F4},{9:F4}) realizedWorld=map:{10}({11:F4},{12:F4})",
+                message.VisualizationFrameSequence,
+                message.VisualizationStreamId,
                 target.IsFocal ? "red" : "blue",
                 target.TargetId,
                 target.TargetRevision,
@@ -182,6 +189,35 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                 continue;
             _paths[path.Sequence] = new TimedPath(path.Points, now + PathLifetime);
         }
+    }
+
+    private bool TryAcceptVisualizationFrame(COGRSpatialVisualizationMessage message)
+    {
+        if (message.VisualizationStreamId == Guid.Empty || message.VisualizationFrameSequence == 0)
+        {
+            _markerSawmill.Warning("Rejected unversioned COGR spatial visualization frame.");
+            return false;
+        }
+
+        if (_visualizationStreamId != message.VisualizationStreamId)
+        {
+            _visualizationStreamId = message.VisualizationStreamId;
+            _latestVisualizationFrameSequence = 0;
+            Clear();
+        }
+
+        if (message.VisualizationFrameSequence <= _latestVisualizationFrameSequence)
+        {
+            _markerSawmill.Debug(
+                "Rejected stale COGR spatial visualization frame {0} for stream {1:N}; latest is {2}.",
+                message.VisualizationFrameSequence,
+                message.VisualizationStreamId,
+                _latestVisualizationFrameSequence);
+            return false;
+        }
+
+        _latestVisualizationFrameSequence = message.VisualizationFrameSequence;
+        return true;
     }
 
     private void Clear()
