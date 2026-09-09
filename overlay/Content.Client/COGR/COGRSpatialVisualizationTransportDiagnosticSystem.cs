@@ -6,8 +6,8 @@ namespace Content.Client.COGR;
 
 /// <summary>
 /// Admin-only transport observer for the spatial visualization stream. This system does not own marker state and cannot
-/// affect cognition or visualization acceptance. It distinguishes a stalled client update loop from delayed visualization
-/// event delivery by reporting bounded receive gaps independently of marker installation.
+/// affect cognition or visualization acceptance. It reports bounded gaps in successfully applied latest-state snapshots and
+/// retains client authoritative-tick diagnostics while the old MsgEntity path is being retired.
 /// </summary>
 public sealed class COGRSpatialVisualizationTransportDiagnosticSystem : EntitySystem
 {
@@ -32,7 +32,13 @@ public sealed class COGRSpatialVisualizationTransportDiagnosticSystem : EntitySy
         base.Initialize();
         _visualization = EntityManager.System<COGRSpatialVisualizationSystem>();
         _sawmill = _logManager.GetSawmill("cogr.spatialtransport");
-        SubscribeNetworkEvent<COGRSpatialVisualizationMessage>(OnVisualizationMessage);
+        _visualization.LatestTransportSnapshotApplied += OnVisualizationMessage;
+    }
+
+    public override void Shutdown()
+    {
+        _visualization.LatestTransportSnapshotApplied -= OnVisualizationMessage;
+        base.Shutdown();
     }
 
     public override void Update(float frameTime)
@@ -50,7 +56,7 @@ public sealed class COGRSpatialVisualizationTransportDiagnosticSystem : EntitySy
         var currentTick = _timing.CurTick;
         var lastRealTick = _timing.LastRealTick;
         _sawmill.Warning(
-            "visualization receive stall ageMs={0:F1} lastFrame={1} stream={2:N} curTick={3} lastRealTick={4} authoritativeLagTicks={5} lastProcessedTick={6} resident={7} projected={8} paths={9}",
+            "visualization latest-state stall ageMs={0:F1} lastFrame={1} stream={2:N} curTick={3} lastRealTick={4} authoritativeLagTicks={5} lastProcessedTick={6} resident={7} projected={8} paths={9}",
             age.TotalMilliseconds,
             _lastFrameSequence,
             _streamId,
@@ -85,7 +91,7 @@ public sealed class COGRSpatialVisualizationTransportDiagnosticSystem : EntitySy
             var currentTick = _timing.CurTick;
             var lastRealTick = _timing.LastRealTick;
             _sawmill.Warning(
-                "visualization receive recovered gapMs={0:F1} frame={1} previousFrame={2} sequenceDelta={3} stream={4:N} curTick={5} lastRealTick={6} authoritativeLagTicks={7} lastProcessedTick={8} resident={9} projected={10} paths={11}",
+                "visualization latest-state recovered gapMs={0:F1} frame={1} previousFrame={2} sequenceDelta={3} stream={4:N} curTick={5} lastRealTick={6} authoritativeLagTicks={7} lastProcessedTick={8} resident={9} projected={10} paths={11}",
                 gap.TotalMilliseconds,
                 message.VisualizationFrameSequence,
                 previousSequence,
