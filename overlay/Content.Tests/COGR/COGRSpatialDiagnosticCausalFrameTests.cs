@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using Content.Server.COGR;
 using Content.Server.COGR.Systems;
+using Content.Shared.COGR.SpatialVisualization;
 using NUnit.Framework;
 
 namespace Content.Tests.COGR;
@@ -93,6 +94,33 @@ public sealed class COGRSpatialDiagnosticCausalFrameTests
             ContainsMethodReference(responseHandler!, resolvePayload),
             Is.True,
             "Administrative response handling must realize the Runtime snapshot through the captured poll frame.");
+    }
+
+    [Test]
+    public void VisualizationFrames_UseStableStreamIdentityAndStrictlyAdvanceSequence()
+    {
+        var first = new COGRSpatialVisualizationMessage();
+        var second = new COGRSpatialVisualizationMessage();
+
+        Assert.That(first.VisualizationStreamId, Is.Not.EqualTo(Guid.Empty));
+        Assert.That(second.VisualizationStreamId, Is.EqualTo(first.VisualizationStreamId));
+        Assert.That(first.VisualizationFrameSequence, Is.GreaterThan(0UL));
+        Assert.That(second.VisualizationFrameSequence, Is.GreaterThan(first.VisualizationFrameSequence));
+    }
+
+    [Test]
+    public void ClientVisualizationInstall_IsGuardedByFrameAcceptanceBoundary()
+    {
+        var clientType = typeof(Content.Client.COGR.COGRSpatialVisualizationSystem);
+        var handler = clientType.GetMethod("OnVisualizationMessage", InstanceNonPublic);
+        var acceptance = clientType.GetMethod("TryAcceptVisualizationFrame", InstanceNonPublic);
+
+        Assert.That(handler, Is.Not.Null);
+        Assert.That(acceptance, Is.Not.Null);
+        Assert.That(
+            ContainsMethodReference(handler!, acceptance!),
+            Is.True,
+            "The client must classify visualization frame currency before installing marker state.");
     }
 
     private static int RequireCallOffset(MethodInfo caller, MethodInfo callee)
