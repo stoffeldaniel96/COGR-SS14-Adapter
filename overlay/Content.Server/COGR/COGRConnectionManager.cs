@@ -238,6 +238,11 @@ public sealed class COGRConnectionManager : IDisposable
         if (string.IsNullOrWhiteSpace(command))
             throw new ArgumentException("Administrative command is required.", nameof(command));
 
+        // Administrative observations share the same source-sequence authority as ordinary environment evidence. Drain
+        // already-produced bridge/outbound evidence first so a diagnostic snapshot cannot overtake body motion or perception
+        // that causally preceded the poll merely because those messages were still waiting in the connection-owned queues.
+        FlushPendingEnvironmentMessages();
+
         var correlationId = Guid.CreateVersion7();
         var envelope = new Proto.EnvironmentEnvelope
         {
@@ -299,14 +304,7 @@ public sealed class COGRConnectionManager : IDisposable
             }
         }
 
-        if (_bridgeMessages != null)
-        {
-            while (_bridgeMessages.TryRead(out var bridgeMessage))
-                _outboundQueue.Enqueue(bridgeMessage);
-        }
-
-        while (_outboundQueue.TryDequeue(out var message))
-            QueueEnvironmentMessage(message);
+        FlushPendingEnvironmentMessages();
     }
 
     public void UpdateHeartbeat(uint currentTick)
@@ -331,6 +329,23 @@ public sealed class COGRConnectionManager : IDisposable
             return;
         DisconnectAsync().GetAwaiter().GetResult();
         _disposed = true;
+    }
+
+    /// <summary>
+    /// Moves all already-produced environment evidence onto the single serialized transport writer. This does not sample or
+    /// manufacture environment state; it only preserves causal order between queued evidence and immediately emitted
+    /// administrative observations that share the same connection source-sequence authority.
+    /// </summary>
+    private void FlushPendingEnvironmentMessages()
+    {
+        if (_bridgeMessages != null)
+        {
+            while (_bridgeMessages.TryRead(out var bridgeMessage))
+                _outboundQueue.Enqueue(bridgeMessage);
+        }
+
+        while (_outboundQueue.TryDequeue(out var message))
+            QueueEnvironmentMessage(message);
     }
 
     private void QueueEnvironmentMessage(EnvironmentMessage message)
