@@ -1,6 +1,6 @@
 using Content.Shared.COGR.SpatialVisualization;
+using Robust.Client.Timing;
 using Robust.Shared.Log;
-using Robust.Shared.Timing;
 
 namespace Content.Client.COGR;
 
@@ -14,7 +14,7 @@ public sealed class COGRSpatialVisualizationTransportDiagnosticSystem : EntitySy
     private static readonly TimeSpan StallThreshold = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan StallReportInterval = TimeSpan.FromMilliseconds(500);
 
-    [Dependency] private IGameTiming _timing = default!;
+    [Dependency] private IClientGameTiming _timing = default!;
     [Dependency] private ILogManager _logManager = default!;
 
     private COGRSpatialVisualizationSystem _visualization = default!;
@@ -47,12 +47,17 @@ public sealed class COGRSpatialVisualizationTransportDiagnosticSystem : EntitySy
             return;
 
         _nextStallReport = now + StallReportInterval;
+        var currentTick = _timing.CurTick;
+        var lastRealTick = _timing.LastRealTick;
         _sawmill.Warning(
-            "visualization receive stall ageMs={0:F1} lastFrame={1} stream={2:N} clientTick={3} resident={4} projected={5} paths={6}",
+            "visualization receive stall ageMs={0:F1} lastFrame={1} stream={2:N} curTick={3} lastRealTick={4} authoritativeLagTicks={5} lastProcessedTick={6} resident={7} projected={8} paths={9}",
             age.TotalMilliseconds,
             _lastFrameSequence,
             _streamId,
-            (ulong)_timing.CurTick.Value,
+            (ulong)currentTick.Value,
+            (ulong)lastRealTick.Value,
+            currentTick.Value >= lastRealTick.Value ? currentTick.Value - lastRealTick.Value : 0,
+            (ulong)_timing.LastProcessedTick.Value,
             _lastResidentTargetCount,
             _lastProjectedTargetCount,
             _lastPathCount);
@@ -77,14 +82,19 @@ public sealed class COGRSpatialVisualizationTransportDiagnosticSystem : EntitySy
             var sequenceDelta = previousSequence == 0 || message.VisualizationFrameSequence <= previousSequence
                 ? 0UL
                 : message.VisualizationFrameSequence - previousSequence;
+            var currentTick = _timing.CurTick;
+            var lastRealTick = _timing.LastRealTick;
             _sawmill.Warning(
-                "visualization receive recovered gapMs={0:F1} frame={1} previousFrame={2} sequenceDelta={3} stream={4:N} clientTick={5} resident={6} projected={7} paths={8}",
+                "visualization receive recovered gapMs={0:F1} frame={1} previousFrame={2} sequenceDelta={3} stream={4:N} curTick={5} lastRealTick={6} authoritativeLagTicks={7} lastProcessedTick={8} resident={9} projected={10} paths={11}",
                 gap.TotalMilliseconds,
                 message.VisualizationFrameSequence,
                 previousSequence,
                 sequenceDelta,
                 message.VisualizationStreamId,
-                (ulong)_timing.CurTick.Value,
+                (ulong)currentTick.Value,
+                (ulong)lastRealTick.Value,
+                currentTick.Value >= lastRealTick.Value ? currentTick.Value - lastRealTick.Value : 0,
+                (ulong)_timing.LastProcessedTick.Value,
                 message.ResidentTargetCount,
                 message.Targets.Length,
                 message.Paths.Length);
