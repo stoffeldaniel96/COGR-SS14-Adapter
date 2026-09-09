@@ -10,9 +10,9 @@ namespace Content.Shared.COGR.SpatialVisualization;
 /// Admin-only latest-state transport for COGR spatial visualization snapshots.
 ///
 /// Spatial visualization is replaceable diagnostic state, not simulation history. It therefore must not inherit
-/// MsgEntity's reliable-ordered/source-tick dispatch semantics: a lost diagnostic frame is harmless because a newer full
-/// snapshot supersedes it, while head-of-line blocking can make an otherwise-correct egocentric diagnostic appear stale.
-/// The payload's process stream id and monotonic visualization frame sequence remain the authority for client currency.
+/// MsgEntity's reliable-ordered/source-tick dispatch semantics. New full snapshots may supersede older ones without waiting
+/// for them in sequence; the payload's process stream id and monotonic visualization frame sequence remain the authority for
+/// client currency.
 /// </summary>
 public sealed class MsgCOGRSpatialVisualizationLatest : NetMessage
 {
@@ -20,10 +20,9 @@ public sealed class MsgCOGRSpatialVisualizationLatest : NetMessage
 
     public override MsgGroups MsgGroup => MsgGroups.EntityEvent;
 
-    // Deliberately not ordered or reliable. The server emits complete replacement snapshots and the client already rejects
-    // stale/non-advancing visualization frame sequences. This keeps admin diagnostics independent of simulation-tick ECS
-    // event ordering and of the per-player ordered encryption/send channel.
-    public override NetDeliveryMethod DeliveryMethod => NetDeliveryMethod.Unreliable;
+    // ReliableUnordered keeps complete diagnostic frames robust without entering Robust's ordered encryption/send lane.
+    // Retransmitted older frames cannot roll marker state backward because the client rejects non-advancing frame sequences.
+    public override NetDeliveryMethod DeliveryMethod => NetDeliveryMethod.ReliableUnordered;
 
     public override void ReadFromBuffer(NetIncomingMessage buffer, IRobustSerializer serializer)
     {
