@@ -111,14 +111,14 @@ public sealed class COGRSpatialDiagnosticCausalFrameTests
     }
 
     [Test]
-    public void LatestVisualizationTransport_IsReplaceableUnreliableState()
+    public void LatestVisualizationTransport_IsReliableWithoutOrderedHeadOfLineSemantics()
     {
         var message = new MsgCOGRSpatialVisualizationLatest();
 
         Assert.That(
             message.DeliveryMethod,
-            Is.EqualTo(NetDeliveryMethod.Unreliable),
-            "A replaceable full diagnostic snapshot must not inherit reliable-ordered MsgEntity head-of-line semantics.");
+            Is.EqualTo(NetDeliveryMethod.ReliableUnordered),
+            "A replaceable full diagnostic snapshot should remain robustly delivered without inheriting reliable-ordered MsgEntity head-of-line semantics.");
     }
 
     [Test]
