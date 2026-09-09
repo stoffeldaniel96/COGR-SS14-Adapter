@@ -38,12 +38,14 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
 
     private COGRAdapterSystem _adapter = default!;
     private COGRBodyAuthorityCoordinatorSystem _authority = default!;
+    private COGRBodyMotionSensationSystem _bodyMotion = default!;
     private ISawmill _traceSawmill = default!;
     private ISawmill _focusSawmill = default!;
     private ISawmill _spatialTraceSawmill = default!;
     private COGRConnectionManager? _subscribedConnection;
     private Guid? _pendingPollCorrelation;
     private string? _pendingPollAgentId;
+    private SpatialPollBodyFrame? _pendingPollBodyFrame;
     private ulong _lastPollTick;
     private int _pollCursor;
 
@@ -52,6 +54,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         base.Initialize();
         _adapter = EntityManager.System<COGRAdapterSystem>();
         _authority = EntityManager.System<COGRBodyAuthorityCoordinatorSystem>();
+        _bodyMotion = EntityManager.System<COGRBodyMotionSensationSystem>();
         _traceSawmill = _logManager.GetSawmill("cogr.navtrace");
         _focusSawmill = _logManager.GetSawmill("cogr.focus");
         _spatialTraceSawmill = _logManager.GetSawmill("cogr.spatialtrace");
@@ -167,6 +170,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         {
             _pendingPollCorrelation = null;
             _pendingPollAgentId = null;
+            _pendingPollBodyFrame = null;
         }
     }
 
@@ -181,6 +185,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         _subscribedConnection = connection;
         _pendingPollCorrelation = null;
         _pendingPollAgentId = null;
+        _pendingPollBodyFrame = null;
         ClearDiagnosticState();
 
         if (_subscribedConnection is not null)
@@ -195,6 +200,20 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         var connection = _subscribedConnection;
         if (connection is not { IsConnected: true })
             return;
+
+        SpatialPollBodyFrame? bodyFrame = null;
+        if (trackResponse)
+        {
+            if (!TryCaptureCausalPollBodyFrame(connection, agentId, out var captured))
+            {
+                _pendingPollCorrelation = null;
+                _pendingPollAgentId = null;
+                _pendingPollBodyFrame = null;
+                return;
+            }
+
+            bodyFrame = captured;
+        }
 
         var parameters = JsonSerializer.SerializeToUtf8Bytes(new
         {
@@ -211,6 +230,9 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
 
         try
         {
+            // SendAdministrativeCommand first drains already-produced environment evidence. For tracked polls the body-motion
+            // boundary above therefore enters the same source-sequence stream before this snapshot command, and the captured
+            // host frame is the physical frame against which the returned cognition-owned local vector must be visualized.
             var correlation = connection.SendAdministrativeCommand(
                 "cogr.debug.spatial.poll",
                 parameters);
@@ -218,6 +240,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
             {
                 _pendingPollCorrelation = correlation;
                 _pendingPollAgentId = agentId;
+                _pendingPollBodyFrame = bodyFrame;
             }
         }
         catch (InvalidOperationException)
@@ -226,8 +249,61 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
             {
                 _pendingPollCorrelation = null;
                 _pendingPollAgentId = null;
+                _pendingPollBodyFrame = null;
             }
         }
+    }
+
+    private bool TryCaptureCausalPollBodyFrame(
+        COGRConnectionManager connection,
+        string rawAgentId,
+        out SpatialPollBodyFrame bodyFrame)
+    {
+        bodyFrame = default;
+        if (connection.ConnectionId == Guid.Empty
+            || !Guid.TryParse(rawAgentId, out var agentGuid)
+            || agentGuid == Guid.Empty)
+        {
+            return false;
+        }
+
+        var connectionId = ConnectionId.FromGuid(connection.ConnectionId);
+        var agentId = AgentId.FromGuid(agentGuid);
+        var lease = _authority.ResolveBoundLease(agentId, connectionId);
+        if (!lease.HasValue || lease.Value.Generation == 0)
+            return false;
+
+        var bodyId = lease.Value.BodyId;
+        var resolvedBody = _authority.ResolveBoundBody(
+            agentId,
+            bodyId,
+            connectionId,
+            lease.Value.Generation);
+        if (!resolvedBody.HasValue)
+            return false;
+
+        // Close any pending continuous owner motion before sampling the diagnostic ego frame. The generated proprioceptive
+        // evidence remains ordinary environment evidence; SendAdministrativeCommand drains it ahead of the admin poll.
+        _bodyMotion.NotifyVisualSamplingBoundary(resolvedBody.Value);
+
+        if (!TryComp(resolvedBody.Value, out TransformComponent? xform))
+            return false;
+        var origin = xform.Coordinates;
+        if (origin.EntityId == EntityUid.Invalid
+            || _transform.ToMapCoordinates(origin).MapId == MapId.Nullspace)
+        {
+            return false;
+        }
+
+        bodyFrame = new SpatialPollBodyFrame(
+            agentId,
+            bodyId,
+            lease.Value.Generation,
+            resolvedBody.Value,
+            origin,
+            xform.LocalRotation,
+            new SimTick((ulong)_timing.CurTick.Value));
+        return true;
     }
 
     private void DisableAllRuntimeObservers()
@@ -236,12 +312,14 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
             SendPoll(agentId, enabled: false, trackResponse: false);
         _pendingPollCorrelation = null;
         _pendingPollAgentId = null;
+        _pendingPollBodyFrame = null;
     }
 
     private void OnAdministrativeResponse(Proto.AdministrativeResponse response)
     {
         if (!_pendingPollCorrelation.HasValue
             || _pendingPollAgentId is null
+            || !_pendingPollBodyFrame.HasValue
             || !Guid.TryParse(response.CorrelationId?.Value, out var correlation)
             || correlation != _pendingPollCorrelation.Value)
         {
@@ -249,8 +327,10 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         }
 
         var requestedAgentId = _pendingPollAgentId;
+        var bodyFrame = _pendingPollBodyFrame.Value;
         _pendingPollCorrelation = null;
         _pendingPollAgentId = null;
+        _pendingPollBodyFrame = null;
         if (!response.Success)
             return;
 
@@ -318,7 +398,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
             }
         }
 
-        var message = ResolvePayload(payload, tracedTargetIds);
+        var message = ResolvePayload(payload, tracedTargetIds, bodyFrame);
         foreach (var subscriber in _subscriberAgents
                      .Where(pair => string.Equals(pair.Value, requestedAgentId, StringComparison.OrdinalIgnoreCase))
                      .Select(static pair => pair.Key)
@@ -338,7 +418,8 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
 
     private COGRSpatialVisualizationMessage ResolvePayload(
         SpatialPollPayload payload,
-        HashSet<string> tracedTargetIds)
+        HashSet<string> tracedTargetIds,
+        SpatialPollBodyFrame bodyFrame)
     {
         var empty = new COGRSpatialVisualizationMessage
         {
@@ -354,7 +435,14 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         }
 
         var connectionId = ConnectionId.FromGuid(connection.ConnectionId);
+        if (!IsCapturedPollBodyFrameStillAuthoritative(connectionId, bodyFrame))
+            return empty;
+
         var currentTick = (ulong)_timing.CurTick.Value;
+        var bodyMapCoordinates = _transform.ToMapCoordinates(bodyFrame.Origin);
+        if (bodyMapCoordinates.MapId == MapId.Nullspace)
+            return empty;
+
         var targets = new List<COGRSpatialVisualizationTarget>();
         var tracedTargetsSeen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var target in payload.Targets)
@@ -364,7 +452,8 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
             {
                 tracedTargetsSeen.Add(target.TargetId);
                 _spatialTraceSawmill.Info(
-                    "runtime tick={0} target={1} rev={2} focal={3} rich={4} local=({5:F4},{6:F4}) resident={7} unprojectable={8}",
+                    "runtime pollTick={0} responseTick={1} target={2} rev={3} focal={4} rich={5} local=({6:F4},{7:F4}) resident={8} unprojectable={9}",
+                    bodyFrame.ObservedAtTick.Value,
                     currentTick,
                     target.TargetId,
                     target.TargetRevision,
@@ -377,23 +466,9 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
             }
 
             if (!string.Equals(target.AgentId, payload.AgentId, StringComparison.OrdinalIgnoreCase)
-                || !TryResolveBodyFrame(
-                    connectionId,
-                    target.AgentId,
-                    out var agentId,
-                    out var bodyId,
-                    out var bodyGeneration,
-                    out var bodyCoordinates,
-                    out var localRotation))
-            {
-                continue;
-            }
-
-            var bodyMapCoordinates = _transform.ToMapCoordinates(bodyCoordinates);
-            if (bodyMapCoordinates.MapId == MapId.Nullspace
                 || !TryRealizeLocalPoint(
-                    bodyCoordinates,
-                    localRotation,
+                    bodyFrame.Origin,
+                    bodyFrame.LocalRotation,
                     target.LocalX,
                     target.LocalY,
                     target.LocalZ,
@@ -425,7 +500,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                 && environmentGuid != Guid.Empty)
             {
                 var environmentReference = EnvironmentRef.FromGuid(environmentGuid);
-                COGRSpatialCalibrationDiagnosticCache.TryGet(agentId, environmentReference, out perceivedSample);
+                COGRSpatialCalibrationDiagnosticCache.TryGet(bodyFrame.AgentId, environmentReference, out perceivedSample);
 
                 var registry = _adapter.ReferenceRegistry;
                 var actualEntity = registry?.TryResolve(
@@ -434,8 +509,8 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                     {
                         ConnectionId = connectionId,
                         CurrentTick = new SimTick(currentTick),
-                        BodyId = bodyId,
-                        BodyGeneration = bodyGeneration,
+                        BodyId = bodyFrame.BodyId,
+                        BodyGeneration = bodyFrame.BodyGeneration,
                     });
                 if (actualEntity.HasValue
                     && TryComp(actualEntity.Value, out TransformComponent? actualTransform))
@@ -462,12 +537,13 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
             if (isTracedTarget)
             {
                 _spatialTraceSawmill.Info(
-                    "station tick={0} target={1} body=({2:F4},{3:F4}) rot={4:F4} belief=({5:F4},{6:F4}) delta=({7:F4},{8:F4})",
+                    "station pollTick={0} responseTick={1} target={2} ego=({3:F4},{4:F4}) rot={5:F4} belief=({6:F4},{7:F4}) delta=({8:F4},{9:F4})",
+                    bodyFrame.ObservedAtTick.Value,
                     currentTick,
                     target.TargetId,
                     bodyMapCoordinates.Position.X,
                     bodyMapCoordinates.Position.Y,
-                    localRotation.Theta,
+                    bodyFrame.LocalRotation.Theta,
                     beliefCoordinates.Position.X,
                     beliefCoordinates.Position.Y,
                     beliefRealizedMapDelta.X,
@@ -489,7 +565,7 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                 BeliefLocalY = target.LocalY,
                 BeliefOwnerRelativeNativeX = ownerRelativeNative.X,
                 BeliefOwnerRelativeNativeY = ownerRelativeNative.Y,
-                BodyLocalRotationRadians = localRotation.Theta,
+                BodyLocalRotationRadians = bodyFrame.LocalRotation.Theta,
                 BeliefParentOffsetX = parentOffset.X,
                 BeliefParentOffsetY = parentOffset.Y,
                 BeliefRealizedMapDeltaX = beliefRealizedMapDelta.X,
@@ -519,7 +595,8 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
                      .OrderBy(static targetId => targetId, StringComparer.Ordinal))
         {
             _spatialTraceSawmill.Info(
-                "runtime tick={0} target={1} absent resident={2} unprojectable={3}",
+                "runtime pollTick={0} responseTick={1} target={2} absent resident={3} unprojectable={4}",
+                bodyFrame.ObservedAtTick.Value,
                 currentTick,
                 targetId,
                 payload.ResidentTargetCount,
@@ -529,25 +606,15 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         var paths = new List<COGRSpatialVisualizationPath>();
         foreach (var path in payload.Paths)
         {
-            if (!string.Equals(path.AgentId, payload.AgentId, StringComparison.OrdinalIgnoreCase)
-                || !TryResolveBodyFrame(
-                    connectionId,
-                    path.AgentId,
-                    out _,
-                    out _,
-                    out _,
-                    out var bodyCoordinates,
-                    out var localRotation))
-            {
+            if (!string.Equals(path.AgentId, payload.AgentId, StringComparison.OrdinalIgnoreCase))
                 continue;
-            }
 
             var points = new List<MapCoordinates>(path.Points.Length);
             foreach (var point in path.Points)
             {
                 if (!TryRealizeLocalPoint(
-                        bodyCoordinates,
-                        localRotation,
+                        bodyFrame.Origin,
+                        bodyFrame.LocalRotation,
                         point.X,
                         point.Y,
                         point.Z,
@@ -583,49 +650,33 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
         };
     }
 
-    private bool TryResolveBodyFrame(
+    private bool IsCapturedPollBodyFrameStillAuthoritative(
         ConnectionId connectionId,
-        string rawAgentId,
-        out AgentId agentId,
-        out BodyId bodyId,
-        out uint bodyGeneration,
-        out EntityCoordinates bodyCoordinates,
-        out Angle localRotation)
+        SpatialPollBodyFrame bodyFrame)
     {
-        agentId = default;
-        bodyId = default;
-        bodyGeneration = 0;
-        bodyCoordinates = default;
-        localRotation = default;
-
-        if (!Guid.TryParse(rawAgentId, out var agentGuid) || agentGuid == Guid.Empty)
+        var lease = _authority.ResolveBoundLease(bodyFrame.AgentId, connectionId);
+        if (!lease.HasValue
+            || lease.Value.BodyId != bodyFrame.BodyId
+            || lease.Value.Generation != bodyFrame.BodyGeneration)
+        {
             return false;
-        agentId = AgentId.FromGuid(agentGuid);
-
-        var lease = _authority.ResolveBoundLease(agentId, connectionId);
-        if (!lease.HasValue)
-            return false;
-        bodyId = lease.Value.BodyId;
-        bodyGeneration = lease.Value.Generation;
+        }
 
         var resolvedBody = _authority.ResolveBoundBody(
-            agentId,
-            bodyId,
+            bodyFrame.AgentId,
+            bodyFrame.BodyId,
             connectionId,
-            bodyGeneration);
-        if (!resolvedBody.HasValue || !TryComp(resolvedBody.Value, out TransformComponent? xform))
+            bodyFrame.BodyGeneration);
+        if (!resolvedBody.HasValue
+            || resolvedBody.Value != bodyFrame.BodyEntity
+            || !TryComp(resolvedBody.Value, out TransformComponent? xform))
+        {
             return false;
+        }
 
-        bodyCoordinates = xform.Coordinates;
-        if (bodyCoordinates.EntityId == EntityUid.Invalid)
-            return false;
-
-        var bodyMapCoordinates = _transform.ToMapCoordinates(bodyCoordinates);
-        if (bodyMapCoordinates.MapId == MapId.Nullspace)
-            return false;
-
-        localRotation = xform.LocalRotation;
-        return true;
+        // A body reparent changes the physical coordinate frame in which the captured origin/rotation were expressed. Do not
+        // reinterpret a historical local frame through a different parent merely to keep the debug marker visible.
+        return xform.ParentUid == bodyFrame.Origin.EntityId;
     }
 
     private bool TryRealizeLocalPoint(
@@ -662,6 +713,9 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
             return false;
         }
 
+        // The endpoint and ego origin are both retained in the exact parent-local frame sampled at poll time. Converting them
+        // only when the response is displayed allows later common-mode grid/map motion, but later body-local motion cannot
+        // silently move the diagnostic origin under a Runtime vector from an earlier causal epoch.
         realized = _transform.ToMapCoordinates(endpoint);
         return realized.MapId != MapId.Nullspace;
     }
@@ -678,6 +732,15 @@ public sealed partial class COGRSpatialVisualizationSystem : EntitySystem
     {
         PropertyNameCaseInsensitive = true,
     };
+
+    private readonly record struct SpatialPollBodyFrame(
+        AgentId AgentId,
+        BodyId BodyId,
+        uint BodyGeneration,
+        EntityUid BodyEntity,
+        EntityCoordinates Origin,
+        Angle LocalRotation,
+        SimTick ObservedAtTick);
 
     private sealed class SpatialPollPayload
     {
