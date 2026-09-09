@@ -135,14 +135,23 @@ public sealed partial class COGRBodyMotionSensationSystem : EntitySystem
     }
 
     /// <summary>
-    /// Closes any pending bodily-motion sensation immediately before a visual scene is sampled from
-    /// this observer. This creates an explicit temporal partition: the fresh visual frame supersedes
-    /// every motion interval ending at or before its observation tick, while later bodily motion can
-    /// re-express that frame normally. No visual or spatial truth is fed back into proprioception.
+    /// Closes any pending bodily-motion sensation immediately before an authoritative egocentric
+    /// owner frame is sampled. This creates an explicit temporal partition without supplying any
+    /// host pose or privileged spatial truth to cognition.
+    /// </summary>
+    public void NotifyOwnerFrameSamplingBoundary(EntityUid uid)
+    {
+        FlushPendingMotion(uid, "owner_frame_sampling_boundary");
+    }
+
+    /// <summary>
+    /// Visual projection is one owner-frame sampling specialization. Keeping this named entry point
+    /// preserves the sensory-projector contract while the generic boundary is also available to
+    /// non-cognitive diagnostics that must bind a Runtime-local snapshot to the same physical epoch.
     /// </summary>
     public void NotifyVisualSamplingBoundary(EntityUid uid)
     {
-        FlushPendingMotion(uid, "visual_sampling_boundary");
+        NotifyOwnerFrameSamplingBoundary(uid);
     }
 
     /// <summary>
