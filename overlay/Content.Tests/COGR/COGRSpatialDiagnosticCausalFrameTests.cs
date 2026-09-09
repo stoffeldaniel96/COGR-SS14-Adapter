@@ -44,8 +44,8 @@ public sealed class COGRSpatialDiagnosticCausalFrameTests
         var systemType = typeof(COGRSpatialVisualizationSystem);
         var capture = systemType.GetMethod("TryCaptureCausalPollBodyFrame", InstanceNonPublic);
         var sendPoll = systemType.GetMethod("SendPoll", InstanceNonPublic);
-        var motionBoundary = typeof(COGRBodyMotionSensationSystem).GetMethod(
-            nameof(COGRBodyMotionSensationSystem.NotifyVisualSamplingBoundary),
+        var ownerFrameBoundary = typeof(COGRBodyMotionSensationSystem).GetMethod(
+            nameof(COGRBodyMotionSensationSystem.NotifyOwnerFrameSamplingBoundary),
             InstancePublic);
         var sendAdministrative = typeof(COGRConnectionManager).GetMethod(
             nameof(COGRConnectionManager.SendAdministrativeCommand),
@@ -53,12 +53,12 @@ public sealed class COGRSpatialDiagnosticCausalFrameTests
 
         Assert.That(capture, Is.Not.Null);
         Assert.That(sendPoll, Is.Not.Null);
-        Assert.That(motionBoundary, Is.Not.Null);
+        Assert.That(ownerFrameBoundary, Is.Not.Null);
         Assert.That(sendAdministrative, Is.Not.Null);
         Assert.That(
-            ContainsMethodReference(capture!, motionBoundary!),
+            ContainsMethodReference(capture!, ownerFrameBoundary!),
             Is.True,
-            "The diagnostic poll frame must close pending owner motion before sampling the host body frame.");
+            "The diagnostic poll frame must close pending owner motion through the generic egocentric sampling boundary before sampling the host body frame.");
 
         var captureOffset = RequireCallOffset(sendPoll!, capture!);
         var sendOffset = RequireCallOffset(sendPoll, sendAdministrative!);
